@@ -1,0 +1,9 @@
+# YAML Station configuration file (simulated Keithley 2600 instruments)
+instruments:
+  keithley1:
+    type: Keithley_2600_sim.Keithley2600
+    address: SIM::K2600::1
+
+  keithley2:
+    type: Keithley_2600_sim.Keithley2600
+    address: SIM::K2600::2

@@ -1,0 +1,129 @@
+{
+  "channels": [
+    {
+      "channel_name": "keithley1.smua",
+      "independent": false,
+      "link_next": false,
+      "name": "keithley1.smua",
+      "state": {
+        "channel_name": "keithley1.smua",
+        "dV": "0.1",
+        "first_node": "1",
+        "n_high": "10",
+        "n_low": "10",
+        "n_mid": "10",
+        "n_offset": "0",
+        "n_period": "100",
+        "n_ramp": "0",
+        "second_node": "-1",
+        "start_voltage": "0",
+        "v_amp": "0.0",
+        "v_fixed": "0.0",
+        "v_high": "0.0",
+        "v_low": "0.0",
+        "v_mid": "0.0",
+        "v_offset": "0.0",
+        "waveform": "Triangle"
+      },
+      "waveform": "Triangle"
+    },
+    {
+      "channel_name": "keithley1.smub",
+      "independent": false,
+      "link_next": false,
+      "name": "keithley1.smub",
+      "state": {
+        "channel_name": "keithley1.smub",
+        "dV": "0.0",
+        "first_node": "0.0",
+        "n_high": "10",
+        "n_low": "10",
+        "n_mid": "10",
+        "n_offset": "0",
+        "n_period": "100",
+        "n_ramp": "0",
+        "second_node": "0.0",
+        "start_voltage": "0.0",
+        "v_amp": "0.0",
+        "v_fixed": "0.0",
+        "v_high": "0.0",
+        "v_low": "0.0",
+        "v_mid": "0.0",
+        "v_offset": "0.0",
+        "waveform": "Triangle"
+      },
+      "waveform": "Triangle"
+    },
+    {
+      "channel_name": "keithley2.smua",
+      "independent": false,
+      "link_next": false,
+      "name": "keithley2.smua",
+      "state": {
+        "channel_name": "keithley2.smua",
+        "dV": "0.0",
+        "first_node": "0.0",
+        "n_high": "10",
+        "n_low": "10",
+        "n_mid": "10",
+        "n_offset": "0",
+        "n_period": "100",
+        "n_ramp": "0",
+        "second_node": "0.0",
+        "start_voltage": "0.0",
+        "v_amp": "0.0",
+        "v_fixed": "0.0",
+        "v_high": "0.0",
+        "v_low": "0.0",
+        "v_mid": "0.0",
+        "v_offset": "0.0",
+        "waveform": "Triangle"
+      },
+      "waveform": "Triangle"
+    },
+    {
+      "channel_name": "keithley2.smub",
+      "independent": false,
+      "link_next": false,
+      "name": "keithley2.smub",
+      "state": {
+        "channel_name": "keithley2.smub",
+        "dV": "0.0",
+        "first_node": "0.0",
+        "n_high": "10",
+        "n_low": "10",
+        "n_mid": "10",
+        "n_offset": "0",
+        "n_period": "100",
+        "n_ramp": "0",
+        "second_node": "0.0",
+        "start_voltage": "0.0",
+        "v_amp": "0.0",
+        "v_fixed": "0.0",
+        "v_high": "0.0",
+        "v_low": "0.0",
+        "v_mid": "0.0",
+        "v_offset": "0.0",
+        "waveform": "Triangle"
+      },
+      "waveform": "Triangle"
+    }
+  ],
+  "options": {
+    "delayNPLC_ratio": "0.8",
+    "dt_list": "0.5",
+    "ramp_down": false,
+    "ramp_up": true,
+    "repeat": "1",
+    "round_delay": "0",
+    "time_independent": false
+  },
+  "paths": {
+    "csv_path": "../_data/csv/sim/test.csv",
+    "db_path": "../_data/db/sim/test.db",
+    "device_name": "test",
+    "exp_name": "test",
+    "yaml_path": "electrochemistry.station.sim.yaml"
+  },
+  "version": 1
+}
