@@ -3,6 +3,7 @@ def abort(chan):
 
 def meas_trig_params(chan):
     #setup buffer
+    chan.write(f"{chan.channel}.measure.autozero = 1")
     chan.write(f"{chan.channel}.trigger.measure.i({chan.channel}.nvbuffer1)")
     chan.write(f"{chan.channel}.nvbuffer1.appendmode = 1")
 
