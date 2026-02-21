@@ -1,0 +1,17 @@
+name: keithley_labtools
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - setuptools
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - pyqt=5
+  - qcodes
+  - pyvisa
+  - pyvisa-py
+  - pyserial
+  - pyyaml
