@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from typing import Any
 
@@ -116,6 +117,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.make_db_btn = QtWidgets.QPushButton("Make DB")
         self.make_db_btn.clicked.connect(self._on_make_db)
         self.db_status = QtWidgets.QLabel("")
+        self.open_plotter_btn = QtWidgets.QPushButton("Open Plotter")
+        self.open_plotter_btn.clicked.connect(self._on_open_plotter)
 
         self.run_indicator = QtWidgets.QLabel()
         self.run_indicator.setFixedSize(12, 12)
@@ -148,12 +151,13 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         layout.addWidget(self.connect_status, 5, 1)
         layout.addWidget(self.make_db_btn, 5, 2)
         layout.addWidget(self.db_status, 5, 3)
+        layout.addWidget(self.open_plotter_btn, 6, 0, 1, 4)
 
         status_row = QtWidgets.QHBoxLayout()
         status_row.addWidget(self.run_indicator)
         status_row.addWidget(self.run_status)
         status_row.addStretch(1)
-        layout.addLayout(status_row, 6, 0, 1, 4)
+        layout.addLayout(status_row, 7, 0, 1, 4)
 
         return box
 
@@ -486,6 +490,27 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             self.db_status.setText("DB ready")
         except Exception as exc:
             self.db_status.setText(f"DB error: {exc}")
+
+    def _on_open_plotter(self) -> None:
+        db_path_raw = self.db_path.text().strip()
+        if not db_path_raw:
+            QtWidgets.QMessageBox.warning(self, "Missing DB Path", "DB path is required.")
+            return
+        db_path = os.path.abspath(os.path.expanduser(os.path.expandvars(db_path_raw)))
+        if not os.path.isfile(db_path):
+            QtWidgets.QMessageBox.warning(self, "Missing File", f"Could not find:\n{db_path}")
+            return
+        script_path = os.path.join(os.path.dirname(__file__), "k_plotter.py")
+        if not os.path.isfile(script_path):
+            QtWidgets.QMessageBox.warning(self, "Missing Plotter", f"Could not find:\n{script_path}")
+            return
+        try:
+            subprocess.Popen(
+                [sys.executable, script_path, "--db", db_path],
+                cwd=os.path.dirname(script_path),
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Failed To Open Plotter", str(exc))
 
     def _populate_channels(self) -> None:
         self.channel_table.setRowCount(0)
