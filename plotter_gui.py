@@ -194,7 +194,7 @@ class LivePlotCanvas(FigureCanvasQTAgg):
 
 
 class LivePlotterGUI(QtWidgets.QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, initial_db_path: str | None = None) -> None:
         super().__init__()
         self.setWindowTitle("QCoDeS Live Plotter")
         self.setAcceptDrops(True)
@@ -243,6 +243,8 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
 
         self._build_menu()
         self._configure_timer()
+        if initial_db_path:
+            self._load_db(initial_db_path, preserve_state=False)
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("File")
@@ -269,6 +271,9 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         self.load_btn = QtWidgets.QPushButton("Load DB")
         self.load_btn.clicked.connect(self._on_load_db)
         layout.addWidget(self.load_btn)
+        self.refresh_db_btn = QtWidgets.QPushButton("Refresh DB")
+        self.refresh_db_btn.clicked.connect(self._on_refresh_db)
+        layout.addWidget(self.refresh_db_btn)
 
         layout.addWidget(QtWidgets.QLabel("Runs / Result Tables"))
         self.run_tree = QtWidgets.QTreeWidget()
@@ -303,7 +308,7 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         split.setChildrenCollapsible(False)
         split.setStretchFactor(0, 0)
         split.setStretchFactor(1, 1)
-        split.setSizes([320, 480])
+        split.setSizes([240, 560])
         split.setHandleWidth(6)
         split.setStyleSheet("QSplitter::handle{background: #c0c0c0;}")
 
@@ -359,15 +364,17 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         self.status_label = QtWidgets.QLabel("")
         self.status_label.setWordWrap(True)
 
-        layout.addWidget(QtWidgets.QLabel("Layout"), 0, 0)
-        layout.addWidget(self.overlay_radio, 0, 1)
-        layout.addWidget(self.subplot_radio, 0, 2)
-
-        layout.addWidget(self.auto_refresh, 1, 0)
-        layout.addWidget(self.refresh_interval, 1, 1)
-        layout.addWidget(self.refresh_now_btn, 1, 2)
-
-        layout.addWidget(self.status_label, 2, 0, 1, 3)
+        layout.addWidget(self.overlay_radio, 0, 0)
+        layout.addWidget(self.subplot_radio, 0, 1)
+        layout.addWidget(self.auto_refresh, 0, 2)
+        layout.addWidget(self.refresh_interval, 0, 3)
+        layout.addWidget(self.refresh_now_btn, 0, 4)
+        layout.addWidget(self.status_label, 1, 0, 1, 5)
+        layout.setColumnStretch(0, 0)
+        layout.setColumnStretch(1, 0)
+        layout.setColumnStretch(2, 0)
+        layout.setColumnStretch(3, 0)
+        layout.setColumnStretch(4, 1)
         return panel
 
     def _build_plot_panel(self) -> QtWidgets.QWidget:
@@ -433,10 +440,31 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         if path:
             self._load_db(path)
 
-    def _load_db(self, path: str) -> None:
+    def _on_refresh_db(self) -> None:
+        db_path = self.reader.path
+        if not db_path:
+            self.status_label.setText("No DB loaded to refresh.")
+            return
+        selected_run_id = self.current_run.run_id if self.current_run is not None else None
+        try:
+            self.reader.open(db_path)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Failed To Refresh DB", str(exc))
+            return
+        self._load_runs(select_run_id=selected_run_id, preserve_plot=True)
+        if self.current_run is not None:
+            self._refresh_now()
+        else:
+            self.status_label.setText("DB refreshed.")
+
+    def _load_db(self, path: str, preserve_state: bool = False) -> None:
         if not os.path.isfile(path):
             QtWidgets.QMessageBox.warning(self, "Missing File", f"Could not find:\n{path}")
             return
+        selected_run_id = self.current_run.run_id if preserve_state and self.current_run else None
+        x_name = self.x_combo.currentText().strip() if preserve_state else ""
+        y_name = self.y_combo.currentText().strip() if preserve_state else "(none)"
+        dep_checks = set(self._checked_dependents()) if preserve_state else set()
         try:
             self.reader.open(path)
         except Exception as exc:
@@ -444,7 +472,10 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
             return
         self.db_label.setText(f"DB: {path}")
         self._update_csv_path_default(path)
-        self._load_runs()
+        self._load_runs(select_run_id=selected_run_id)
+        if preserve_state and self.current_run is not None:
+            self._restore_plot_selection(x_name, y_name, dep_checks)
+            self._refresh_now()
 
     def _update_csv_path_default(self, db_path: str) -> None:
         if not db_path:
@@ -452,10 +483,16 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         base, _ = os.path.splitext(db_path)
         self.csv_path.setText(base + ".csv")
 
-    def _load_runs(self) -> None:
+    def _load_runs(
+        self,
+        select_run_id: int | None = None,
+        preserve_plot: bool = False,
+    ) -> None:
+        previous_run = self.current_run
         self.run_tree.clear()
         self.runs = []
-        self.current_run = None
+        if not preserve_plot:
+            self.current_run = None
         try:
             self.runs = self.reader.list_runs()
         except Exception as exc:
@@ -463,6 +500,8 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
             return
         groups: dict[str, QtWidgets.QTreeWidgetItem] = {}
         first_group: QtWidgets.QTreeWidgetItem | None = None
+        selected_item: QtWidgets.QTreeWidgetItem | None = None
+        selected_run: RunInfo | None = None
         for run in self.runs:
             status = "completed" if run.is_completed else "live"
             label = f"Run {run.run_id} | {run.name} | {run.table} | {status}"
@@ -478,6 +517,27 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
             child = QtWidgets.QTreeWidgetItem([label])
             child.setData(0, QtCore.Qt.UserRole, run.run_id)
             group.addChild(child)
+            if select_run_id is not None and run.run_id == select_run_id:
+                selected_item = child
+                selected_run = run
+        if selected_item is not None and selected_run is not None:
+            parent = selected_item.parent()
+            if parent is not None:
+                parent.setExpanded(True)
+            self.run_tree.setCurrentItem(selected_item)
+            if (
+                preserve_plot
+                and previous_run is not None
+                and previous_run.run_id == selected_run.run_id
+                and previous_run.table == selected_run.table
+            ):
+                self.current_run = selected_run
+                self.run_summary.setText(
+                    f"Run {selected_run.run_id} | Exp {selected_run.exp_id} | {selected_run.name} | {selected_run.table}"
+                )
+                return
+            self._select_run(selected_run)
+            return
         if first_group is not None:
             first_group.setExpanded(True)
             if first_group.childCount() > 0:
@@ -485,6 +545,8 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
                 self._select_run(self.runs[0])
         if self.runs:
             return
+        self.current_run = None
+        self.run_summary.setText("No run selected.")
 
     def _on_run_tree_selected(self, item: QtWidgets.QTreeWidgetItem) -> None:
         run_id = item.data(0, QtCore.Qt.UserRole)
@@ -970,6 +1032,35 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
                 break
         return [dep]
 
+    def _restore_plot_selection(
+        self,
+        x_name: str,
+        y_name: str,
+        dep_checks: set[str],
+    ) -> None:
+        if self.current_run is None:
+            return
+        self.x_combo.blockSignals(True)
+        self.y_combo.blockSignals(True)
+        x_idx = self.x_combo.findText(x_name)
+        if x_idx >= 0:
+            self.x_combo.setCurrentIndex(x_idx)
+        y_idx = self.y_combo.findText(y_name)
+        if y_idx >= 0:
+            self.y_combo.setCurrentIndex(y_idx)
+        self.x_combo.blockSignals(False)
+        self.y_combo.blockSignals(False)
+
+        self.dep_list.blockSignals(True)
+        for idx in range(self.dep_list.count()):
+            item = self.dep_list.item(idx)
+            name = item.data(QtCore.Qt.UserRole)
+            item.setCheckState(
+                QtCore.Qt.Checked if name in dep_checks else QtCore.Qt.Unchecked
+            )
+        self.dep_list.blockSignals(False)
+        self._update_plot(force_rebuild=True)
+
     def _on_refresh_interval_changed(self) -> None:
         interval_ms = int(self.refresh_interval.value() * 1000)
         self.timer.setInterval(interval_ms)
@@ -1032,7 +1123,14 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
 
 def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
-    win = LivePlotterGUI()
+    initial_db_path: str | None = None
+    args = sys.argv[1:]
+    if args:
+        if args[0] == "--db" and len(args) > 1:
+            initial_db_path = args[1]
+        else:
+            initial_db_path = args[0]
+    win = LivePlotterGUI(initial_db_path=initial_db_path)
     win.resize(1200, 800)
     win.show()
     sys.exit(app.exec_())
