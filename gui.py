@@ -7,7 +7,7 @@ import sys
 from typing import Any
 
 import numpy as np
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
@@ -30,24 +30,68 @@ class WaveformPlot(FigureCanvasQTAgg):
         super().__init__(self.fig)
         self.setParent(parent)
         self.ax = self.fig.add_subplot(1, 1, 1)
+        self.color_cycle = [
+            "#264653",
+            "#2A9D8F",
+            "#E9C46A",
+            "#F4A261",
+            "#E76F51",
+            "#6D597A",
+            "#355070",
+            "#B56576",
+            "#FFB4A2",
+            "#9A8C98",
+        ]
 
-    def plot(self, traces: dict[str, tuple[np.ndarray, np.ndarray]]) -> None:
-        self.ax.clear()
-        for name, (t, v) in traces.items():
-            self.ax.plot(t, v, label=name)
-        self.ax.set_xlabel("Time (s)")
-        self.ax.set_ylabel("Voltage (V)")
-        if traces:
+    def plot(self, traces: dict[str, tuple[np.ndarray, np.ndarray]], mode: str) -> None:
+        self.fig.clear()
+        if not traces:
+            self.ax = self.fig.add_subplot(1, 1, 1)
+            self.ax.grid(True, which="both", alpha=0.3, linestyle="--", linewidth=0.6)
+            self.draw()
+            return
+
+        if mode == "subplot":
+            names = list(traces.keys())
+            nrows, ncols = self._subplot_grid(len(names))
+            for idx, name in enumerate(names, start=1):
+                ax = self.fig.add_subplot(nrows, ncols, idx)
+                t, v = traces[name]
+                ax.set_prop_cycle(color=self.color_cycle)
+                ax.plot(t, v, linestyle="-", marker="o", markersize=3, linewidth=1)
+                ax.set_title(name)
+                ax.set_xlabel("Time (s)")
+                if (idx - 1) % ncols == 0:
+                    ax.set_ylabel("Voltage (V)")
+                else:
+                    ax.set_ylabel("")
+                ax.grid(True, which="both", alpha=0.3, linestyle="--", linewidth=0.6)
+        else:
+            self.ax = self.fig.add_subplot(1, 1, 1)
+            self.ax.set_prop_cycle(color=self.color_cycle)
+            for name, (t, v) in traces.items():
+                self.ax.plot(t, v, label=name, linestyle="-", marker="o", markersize=3, linewidth=1)
+            self.ax.set_xlabel("Time (s)")
+            self.ax.set_ylabel("Voltage (V)")
             self.ax.legend(loc="best")
+            self.ax.grid(True, which="both", alpha=0.3, linestyle="--", linewidth=0.6)
+        self.fig.tight_layout()
         self.draw()
+
+    @staticmethod
+    def _subplot_grid(count: int) -> tuple[int, int]:
+        if count <= 1:
+            return 1, 1
+        ncols = 4
+        nrows = int(np.ceil(count / ncols))
+        return nrows, ncols
 
 
 class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
     COL_CHANNEL = 0
     COL_NAME = 1
     COL_WAVEFORM = 2
-    COL_INDEP = 3
-    COL_LINK = 4
+    COL_LINK = 3
 
     def __init__(self) -> None:
         super().__init__()
@@ -69,23 +113,23 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
         main.addWidget(conn_block)
 
-        bottom = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        bottom.addWidget(options_block)
-        bottom.addWidget(plot_block)
-        bottom.setChildrenCollapsible(False)
-        bottom.setStretchFactor(0, 1)
-        bottom.setStretchFactor(1, 1)
-        bottom.setSizes([500, 500])
-        bottom.setHandleWidth(6)
-        bottom.setStyleSheet("QSplitter::handle{background: #c0c0c0;}")
+        mid = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        mid.addWidget(params_block)
+        mid.addWidget(options_block)
+        mid.setChildrenCollapsible(False)
+        mid.setStretchFactor(0, 1)
+        mid.setStretchFactor(1, 0)
+        mid.setSizes([850, 350])
+        mid.setHandleWidth(6)
+        mid.setStyleSheet("QSplitter::handle{background: #c0c0c0;}")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-        splitter.addWidget(params_block)
-        splitter.addWidget(bottom)
+        splitter.addWidget(mid)
+        splitter.addWidget(plot_block)
         splitter.setChildrenCollapsible(False)
-        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([300, 500])
+        splitter.setSizes([350, 550])
         splitter.setHandleWidth(6)
         splitter.setStyleSheet("QSplitter::handle{background: #c0c0c0;}")
 
@@ -129,35 +173,39 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         state_btns.addWidget(self.load_state_btn)
         state_btns.addWidget(self.save_state_btn)
 
-        layout.addWidget(QtWidgets.QLabel("GUI state file"), 0, 0)
+        layout.addWidget(QtWidgets.QLabel("GUI state"), 0, 0)
         layout.addWidget(self.state_path, 0, 1, 1, 2)
-        layout.addLayout(state_btns, 0, 3, 1, 1)
+        layout.addLayout(state_btns, 0, 3, 1, 2)
 
-        layout.addWidget(QtWidgets.QLabel("YAML config path"), 1, 0)
-        layout.addWidget(self.yaml_path, 1, 1, 1, 3)
+        layout.addWidget(QtWidgets.QLabel("YAML"), 1, 0)
+        layout.addWidget(self.yaml_path, 1, 1, 1, 2)
+        connect_row = QtWidgets.QHBoxLayout()
+        connect_row.addWidget(self.connect_btn)
+        connect_row.addWidget(self.connect_status)
+        connect_row.addStretch(1)
+        layout.addLayout(connect_row, 1, 3, 1, 2)
 
-        layout.addWidget(QtWidgets.QLabel("DB save path"), 2, 0)
-        layout.addWidget(self.db_path, 2, 1, 1, 3)
+        layout.addWidget(QtWidgets.QLabel("DB / CSV"), 2, 0)
+        layout.addWidget(self.db_path, 2, 1)
+        layout.addWidget(self.csv_path, 2, 2)
+        layout.addWidget(self.make_db_btn, 2, 3)
+        layout.addWidget(self.db_status, 2, 4)
 
-        layout.addWidget(QtWidgets.QLabel("CSV save path"), 3, 0)
-        layout.addWidget(self.csv_path, 3, 1, 1, 3)
+        layout.addWidget(QtWidgets.QLabel("Experiment / Device"), 3, 0)
+        layout.addWidget(self.exp_name, 3, 1)
+        layout.addWidget(self.device_name, 3, 2)
 
-        layout.addWidget(QtWidgets.QLabel("Experiment name"), 4, 0)
-        layout.addWidget(self.exp_name, 4, 1, 1, 1)
-        layout.addWidget(QtWidgets.QLabel("Device name"), 4, 2)
-        layout.addWidget(self.device_name, 4, 3)
-
-        layout.addWidget(self.connect_btn, 5, 0)
-        layout.addWidget(self.connect_status, 5, 1)
-        layout.addWidget(self.make_db_btn, 5, 2)
-        layout.addWidget(self.db_status, 5, 3)
-        layout.addWidget(self.open_plotter_btn, 6, 0, 1, 4)
+        layout.addWidget(self.open_plotter_btn, 4, 0, 1, 5)
 
         status_row = QtWidgets.QHBoxLayout()
         status_row.addWidget(self.run_indicator)
         status_row.addWidget(self.run_status)
         status_row.addStretch(1)
-        layout.addLayout(status_row, 7, 0, 1, 4)
+        layout.addLayout(status_row, 5, 0, 1, 5)
+
+        layout.setColumnStretch(1, 2)
+        layout.setColumnStretch(2, 2)
+        layout.setColumnStretch(4, 1)
 
         return box
 
@@ -166,22 +214,30 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(box)
 
         # Left table: compact channel list.
-        self.channel_table = QtWidgets.QTableWidget(0, 5)
+        self.channel_table = QtWidgets.QTableWidget(0, 4)
         self.channel_table.setHorizontalHeaderLabels(
             [
                 "Channel",
                 "Name",
                 "Waveform",
-                "Independent",
                 "Link Next",
             ]
         )
-        self.channel_table.horizontalHeader().setStretchLastSection(True)
+        header = self.channel_table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(self.COL_CHANNEL, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(self.COL_NAME, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(self.COL_WAVEFORM, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(self.COL_LINK, QtWidgets.QHeaderView.Fixed)
+        self._tune_channel_table_columns()
         self.channel_table.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
         self.channel_table.selectionModel().currentRowChanged.connect(
             self._on_row_selected
+        )
+        self.channel_table.horizontalHeader().sectionResized.connect(
+            lambda *_: self._tune_channel_table_columns()
         )
 
         btn_row = QtWidgets.QHBoxLayout()
@@ -192,8 +248,6 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         btn_row.addWidget(self.move_up_btn)
         btn_row.addWidget(self.move_down_btn)
         btn_row.addStretch(1)
-
-        layout.addLayout(btn_row)
 
         # Right panel: per-channel detail editor.
         self.detail_panel = self._build_detail_panel()
@@ -209,72 +263,97 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         split.setStyleSheet("QSplitter::handle{background: #c0c0c0;}")
 
         layout.addWidget(split, 1)
+        layout.addLayout(btn_row)
 
         return box
+
+    def _tune_channel_table_columns(self) -> None:
+        header = self.channel_table.horizontalHeader()
+        self.channel_table.resizeColumnsToContents()
+        metrics = QtGui.QFontMetrics(self.channel_table.font())
+        link_text = self.channel_table.horizontalHeaderItem(self.COL_LINK).text()
+        link_width = metrics.horizontalAdvance(link_text) + 22
+        header.resizeSection(self.COL_LINK, link_width)
 
     def _build_options_block(self) -> QtWidgets.QGroupBox:
         box = QtWidgets.QGroupBox("Options")
         layout = QtWidgets.QGridLayout(box)
 
-        self.time_independent = QtWidgets.QCheckBox()
         self.ramp_up = QtWidgets.QCheckBox()
         self.ramp_down = QtWidgets.QCheckBox()
         self.dt_list = QtWidgets.QLineEdit("0.5")
         self.delayNPLC_ratio = QtWidgets.QLineEdit("0.8")
         self.repeat = QtWidgets.QLineEdit("1")
         self.round_delay = QtWidgets.QLineEdit("0")
+        self.ramp_dv = QtWidgets.QLineEdit("5e-5")
+        self.ramp_dt = QtWidgets.QLineEdit("1e-3")
 
-        layout.addWidget(QtWidgets.QLabel("time_independent"), 0, 0)
-        layout.addWidget(self.time_independent, 0, 1)
-        layout.addWidget(QtWidgets.QLabel("ramp_up"), 0, 2)
-        layout.addWidget(self.ramp_up, 0, 3)
+        layout.addWidget(QtWidgets.QLabel("ramp_up"), 0, 0)
+        layout.addWidget(self.ramp_up, 0, 1)
+        layout.addWidget(QtWidgets.QLabel("ramp_down"), 0, 2)
+        layout.addWidget(self.ramp_down, 0, 3)
 
-        layout.addWidget(QtWidgets.QLabel("ramp_down"), 1, 0)
-        layout.addWidget(self.ramp_down, 1, 1)
+        layout.addWidget(QtWidgets.QLabel("ramp_dV"), 1, 0)
+        layout.addWidget(self.ramp_dv, 1, 1)
+        layout.addWidget(QtWidgets.QLabel("ramp_dT (s)"), 1, 2)
+        layout.addWidget(self.ramp_dt, 1, 3)
 
-        self.ramp_to_zero_btn = QtWidgets.QPushButton("Ramp Channels To 0")
-        self.ramp_to_zero_btn.clicked.connect(self._on_ramp_to_zero)
-        layout.addWidget(self.ramp_to_zero_btn, 2, 0, 1, 2)
-        layout.addWidget(QtWidgets.QLabel("dt_list (comma)"), 2, 2)
-        layout.addWidget(self.dt_list, 2, 3)
+        layout.addWidget(QtWidgets.QLabel("dt_list (comma)"), 2, 0)
+        layout.addWidget(self.dt_list, 2, 1)
+        layout.addWidget(QtWidgets.QLabel("delayNPLC_ratio"), 2, 2)
+        layout.addWidget(self.delayNPLC_ratio, 2, 3)
 
-        layout.addWidget(QtWidgets.QLabel("delayNPLC_ratio"), 3, 0)
-        layout.addWidget(self.delayNPLC_ratio, 3, 1)
-        layout.addWidget(QtWidgets.QLabel("repeat"), 3, 2)
-        layout.addWidget(self.repeat, 3, 3)
-
-        layout.addWidget(QtWidgets.QLabel("round_delay (s)"), 4, 0)
-        layout.addWidget(self.round_delay, 4, 1)
-
-        self.plot_btn = QtWidgets.QPushButton("Plot Waveforms")
-        self.plot_btn.clicked.connect(self._on_plot)
-        layout.addWidget(self.plot_btn, 5, 0, 1, 2)
-
-        self.run_btn = QtWidgets.QPushButton("Run")
-        self.run_btn.clicked.connect(self._on_run)
-        layout.addWidget(self.run_btn, 5, 2, 1, 2)
-
-        self.pause_btn = QtWidgets.QPushButton("Pause")
-        self.pause_btn.setEnabled(False)
-        self.pause_btn.clicked.connect(self._on_pause_resume)
-        layout.addWidget(self.pause_btn, 6, 0, 1, 2)
-
-        self.stop_btn = QtWidgets.QPushButton("Stop")
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self._on_stop)
-        layout.addWidget(self.stop_btn, 6, 2, 1, 2)
+        layout.addWidget(QtWidgets.QLabel("repeat"), 3, 0)
+        layout.addWidget(self.repeat, 3, 1)
+        layout.addWidget(QtWidgets.QLabel("round_delay (s)"), 3, 2)
+        layout.addWidget(self.round_delay, 3, 3)
 
         return box
 
     def _build_plot_block(self) -> QtWidgets.QGroupBox:
         box = QtWidgets.QGroupBox("Waveforms vs Time")
-        layout = QtWidgets.QVBoxLayout(box)
+        layout = QtWidgets.QHBoxLayout(box)
+
+        control_col = QtWidgets.QVBoxLayout()
+        self.overlay_radio = QtWidgets.QRadioButton("Overlay")
+        self.subplot_radio = QtWidgets.QRadioButton("Subplots")
+        self.overlay_radio.setChecked(True)
+        control_col.addWidget(self.overlay_radio)
+        control_col.addWidget(self.subplot_radio)
+
+        self.plot_btn = QtWidgets.QPushButton("Plot Waveforms")
+        self.plot_btn.clicked.connect(self._on_plot)
+        control_col.addWidget(self.plot_btn)
+
+        control_col.addWidget(QtWidgets.QFrame(frameShape=QtWidgets.QFrame.HLine))
+
+        self.run_btn = QtWidgets.QPushButton("Run")
+        self.run_btn.clicked.connect(self._on_run)
+        control_col.addWidget(self.run_btn)
+
+        self.stop_btn = QtWidgets.QPushButton("Stop")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self._on_stop)
+        control_col.addWidget(self.stop_btn)
+
+        self.pause_btn = QtWidgets.QPushButton("Pause")
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.clicked.connect(self._on_pause_resume)
+        control_col.addWidget(self.pause_btn)
+
+        self.ramp_to_zero_btn = QtWidgets.QPushButton("Ramp Channels To 0")
+        self.ramp_to_zero_btn.clicked.connect(self._on_ramp_to_zero)
+        control_col.addWidget(self.ramp_to_zero_btn)
+
+        control_col.addStretch(1)
+        layout.addLayout(control_col)
         self.plot = WaveformPlot()
-        layout.addWidget(self.plot)
+        layout.addWidget(self.plot, 1)
+        layout.setStretch(0, 0)
+        layout.setStretch(1, 1)
         return box
 
     def _set_defaults(self) -> None:
-        self.time_independent.setChecked(False)
         self.ramp_up.setChecked(True)
         self.ramp_down.setChecked(False)
 
@@ -337,7 +416,6 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             channel_name = self._get_table_text(row, self.COL_CHANNEL, f"row{row}")
             name = self._get_table_text(row, self.COL_NAME, channel_name)
             waveform = self._get_waveform_value(row)
-            independent = self._get_check_state(row, self.COL_INDEP)
             link_next = self._get_check_state(row, self.COL_LINK)
             state = dict(self._get_row_state(row))
             state["channel_name"] = channel_name
@@ -347,7 +425,6 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                     "channel_name": channel_name,
                     "name": name,
                     "waveform": waveform,
-                    "independent": independent,
                     "link_next": link_next,
                     "state": state,
                 }
@@ -363,13 +440,15 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                 "device_name": self.device_name.text(),
             },
             "options": {
-                "time_independent": self.time_independent.isChecked(),
                 "ramp_up": self.ramp_up.isChecked(),
                 "ramp_down": self.ramp_down.isChecked(),
                 "dt_list": self.dt_list.text(),
                 "delayNPLC_ratio": self.delayNPLC_ratio.text(),
                 "repeat": self.repeat.text(),
                 "round_delay": self.round_delay.text(),
+                "ramp_dv": self.ramp_dv.text(),
+                "ramp_dt": self.ramp_dt.text(),
+                "waveform_layout": "subplot" if self.subplot_radio.isChecked() else "overlay",
             },
             "channels": channels,
         }
@@ -385,13 +464,19 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
         options = state.get("options", {})
         if isinstance(options, dict):
-            self.time_independent.setChecked(bool(options.get("time_independent", self.time_independent.isChecked())))
             self.ramp_up.setChecked(bool(options.get("ramp_up", self.ramp_up.isChecked())))
             self.ramp_down.setChecked(bool(options.get("ramp_down", self.ramp_down.isChecked())))
             self.dt_list.setText(str(options.get("dt_list", self.dt_list.text())))
             self.delayNPLC_ratio.setText(str(options.get("delayNPLC_ratio", self.delayNPLC_ratio.text())))
             self.repeat.setText(str(options.get("repeat", self.repeat.text())))
             self.round_delay.setText(str(options.get("round_delay", self.round_delay.text())))
+            self.ramp_dv.setText(str(options.get("ramp_dv", self.ramp_dv.text())))
+            self.ramp_dt.setText(str(options.get("ramp_dt", self.ramp_dt.text())))
+            layout = str(options.get("waveform_layout", "overlay"))
+            if layout == "subplot":
+                self.subplot_radio.setChecked(True)
+            else:
+                self.overlay_radio.setChecked(True)
 
         channels = state.get("channels")
         if isinstance(channels, list):
@@ -417,16 +502,11 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.channel_table.setItem(row, self.COL_NAME, QtWidgets.QTableWidgetItem(name))
 
         combo = QtWidgets.QComboBox()
-        combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed"])
+        combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed", "CSV"])
         combo.setCurrentText(waveform)
         combo.setProperty("row", row)
         combo.currentTextChanged.connect(self._on_waveform_changed_for_widget)
         self.channel_table.setCellWidget(row, self.COL_WAVEFORM, combo)
-
-        indep = QtWidgets.QTableWidgetItem()
-        indep.setFlags(indep.flags() | QtCore.Qt.ItemIsUserCheckable)
-        indep.setCheckState(QtCore.Qt.Checked if data.get("independent") else QtCore.Qt.Unchecked)
-        self.channel_table.setItem(row, self.COL_INDEP, indep)
 
         link_next = QtWidgets.QTableWidgetItem()
         link_next.setFlags(link_next.flags() | QtCore.Qt.ItemIsUserCheckable)
@@ -530,16 +610,11 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         )
 
         combo = QtWidgets.QComboBox()
-        combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed"])
+        combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed", "CSV"])
         combo.setCurrentText("Triangle")
         combo.setProperty("row", row)
         combo.currentTextChanged.connect(self._on_waveform_changed_for_widget)
         self.channel_table.setCellWidget(row, self.COL_WAVEFORM, combo)
-
-        indep = QtWidgets.QTableWidgetItem()
-        indep.setFlags(indep.flags() | QtCore.Qt.ItemIsUserCheckable)
-        indep.setCheckState(QtCore.Qt.Unchecked)
-        self.channel_table.setItem(row, self.COL_INDEP, indep)
 
         link_next = QtWidgets.QTableWidgetItem()
         link_next.setFlags(link_next.flags() | QtCore.Qt.ItemIsUserCheckable)
@@ -583,7 +658,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             return
 
         traces = build_traces(configs, dt_list, repeat, round_delay)
-        self.plot.plot(traces)
+        mode = "subplot" if self.subplot_radio.isChecked() else "overlay"
+        self.plot.plot(traces, mode)
 
     def _collect_channel_configs(self) -> list[ChannelConfig]:
         configs: list[ChannelConfig] = []
@@ -611,10 +687,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             v_amp = float(state["v_amp"])
             v_offset = float(state["v_offset"])
             n_period = int(state["n_period"])
+            csv_path = str(state.get("csv_path", "")).strip()
 
-            independent = (
-                self.channel_table.item(row, self.COL_INDEP).checkState() == QtCore.Qt.Checked
-            )
             link_next = (
                 self.channel_table.item(row, self.COL_LINK).checkState() == QtCore.Qt.Checked
             )
@@ -640,7 +714,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                     v_amp=v_amp,
                     v_offset=v_offset,
                     n_period=n_period,
-                    independent=independent,
+                    csv_path=csv_path,
+                    independent=False,
                     link_next=link_next,
                 )
             )
@@ -692,7 +767,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                 continue
             if value[0] == "combo":
                 combo = QtWidgets.QComboBox()
-                combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed"])
+                combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed", "CSV"])
                 combo.setCurrentText(value[1])
                 combo.setProperty("row", row)
                 combo.currentTextChanged.connect(self._on_waveform_changed_for_widget)
@@ -701,7 +776,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                 text = value[1]
                 check = value[2]
                 item = QtWidgets.QTableWidgetItem(text)
-                if col in (self.COL_INDEP, self.COL_LINK):
+                if col in (self.COL_LINK,):
                     item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
                     item.setCheckState(check)
                 self.channel_table.setItem(row, col, item)
@@ -783,11 +858,21 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.fixed_v = QtWidgets.QLineEdit("0.0")
         fixed_layout.addRow("V Fixed", self.fixed_v)
 
+        # CSV params
+        self.csv_group = QtWidgets.QGroupBox("CSV Params")
+        csv_layout = QtWidgets.QHBoxLayout(self.csv_group)
+        self.csv_path = QtWidgets.QLineEdit("")
+        self.csv_browse_btn = QtWidgets.QPushButton("Browse")
+        self.csv_browse_btn.clicked.connect(self._on_browse_csv)
+        csv_layout.addWidget(self.csv_path, 1)
+        csv_layout.addWidget(self.csv_browse_btn)
+
         layout.addWidget(self.tri_group)
         layout.addWidget(self.square_group)
         layout.addWidget(self.square3_group)
         layout.addWidget(self.sine_group)
         layout.addWidget(self.fixed_group)
+        layout.addWidget(self.csv_group)
 
         self.save_detail_btn = QtWidgets.QPushButton("Apply To Selected Channel")
         self.save_detail_btn.clicked.connect(self._on_apply_details)
@@ -833,6 +918,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.sine_n_period.setText(str(state["n_period"]))
 
         self.fixed_v.setText(str(state["v_fixed"]))
+        self.csv_path.setText(str(state.get("csv_path", "")))
 
     def _on_apply_details(self) -> None:
         row = self.channel_table.currentRow()
@@ -870,8 +956,16 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         state["n_period"] = self.sine_n_period.text()
 
         state["v_fixed"] = self.fixed_v.text()
+        state["csv_path"] = self.csv_path.text().strip()
 
         self._set_row_state(row, state)
+
+    def _on_browse_csv(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select CSV Waveform", "", "CSV Files (*.csv);;All Files (*)"
+        )
+        if path:
+            self.csv_path.setText(path)
 
     def _update_detail_visibility(self, waveform: str) -> None:
         wf = waveform.lower()
@@ -880,6 +974,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.square3_group.setVisible(wf == "square-3")
         self.sine_group.setVisible(wf == "sine")
         self.fixed_group.setVisible(wf == "fixed")
+        self.csv_group.setVisible(wf == "csv")
 
     def _get_row_state(self, row: int) -> dict[str, Any]:
         # Persist per-row detail state on the row item itself.
@@ -922,6 +1017,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             "v_amp": "0.0",
             "v_offset": "0.0",
             "n_period": "100",
+            "csv_path": "",
         }
 
     def _set_row_state_defaults(self, row: int) -> None:
@@ -992,9 +1088,13 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             sweepers, _ = build_sweepers(
                 configs, self.keithleys, square_final_low=False
             )
+            ramp_dv = float(self.ramp_dv.text().strip() or "5e-5")
+            ramp_dt = float(self.ramp_dt.text().strip() or "1e-3")
             for sweeper in sweepers:
                 if "nano" not in sweeper["name"]:
-                    utilities.ramp_voltage(sweeper["channel"], 0)
+                    utilities.ramp_voltage(
+                        sweeper["channel"], 0, rampdV=ramp_dv, rampdT=ramp_dt
+                    )
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Ramp Failed", str(exc))
 
@@ -1037,7 +1137,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             csv_path=csv_path,
             ramp_up=self.ramp_up.isChecked(),
             ramp_down=self.ramp_down.isChecked(),
-            time_independent=self.time_independent.isChecked(),
+            time_independent=True,
         )
         self.run_worker.moveToThread(self.run_thread)
         self.run_thread.started.connect(self.run_worker.run)
@@ -1072,6 +1172,9 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
 def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
+    icon_path = os.path.join(os.path.dirname(__file__), "icons", "control_icon.ico")
+    if os.path.isfile(icon_path):
+        app.setWindowIcon(QtGui.QIcon(icon_path))
     win = ArbitrarySweeperGUI()
     win.resize(1100, 800)
     win.show()

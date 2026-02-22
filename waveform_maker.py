@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,11 +29,14 @@ class ChannelConfig:
     v_amp: float
     v_offset: float
     n_period: int
+    csv_path: str
     independent: bool
     link_next: bool
 
 
 def build_v_range(cfg: ChannelConfig, square_final_low: bool = True) -> np.ndarray:
+    if cfg.waveform.lower() == "csv":
+        return build_csv_wave(cfg)
     if cfg.waveform.lower() == "square":
         return build_square_wave(cfg, include_final_low=square_final_low)
     if cfg.waveform.lower() == "square-3":
@@ -113,6 +117,22 @@ def build_sine_wave(cfg: ChannelConfig) -> np.ndarray:
     n_period = max(1, int(cfg.n_period))
     t = np.linspace(0, 2 * np.pi, n_period, endpoint=False)
     return v_offset + v_amp * np.sin(t)
+
+
+def build_csv_wave(cfg: ChannelConfig) -> np.ndarray:
+    path = cfg.csv_path.strip()
+    if not path:
+        raise ValueError("CSV waveform selected but no file path provided.")
+    if not os.path.isfile(path):
+        raise ValueError(f"CSV waveform file not found: {path}")
+    data = np.loadtxt(path, delimiter=",", dtype=float)
+    if data.ndim > 1:
+        data = data[:, 0]
+    data = np.array(data, dtype=float)
+    data = data[np.isfinite(data)]
+    if data.size == 0:
+        raise ValueError(f"CSV waveform file has no numeric values: {path}")
+    return data
 
 
 def build_groups(configs: list[ChannelConfig]) -> list[list[int]]:

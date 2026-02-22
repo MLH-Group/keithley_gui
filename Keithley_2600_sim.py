@@ -21,6 +21,7 @@ class _ChannelState:
     source_rangei: float = 0.1
     measure_rangev: float = 20.0
     measure_rangei: float = 0.1
+    measure_autozero: int = 1
     trigger_measure_mode: str = "i"
     trigger_initiated: bool = False
     pending_linear_v: float | None = None
@@ -197,7 +198,7 @@ class Keithley2600(Instrument):
             return f"{self._buffer_get(self._state[ch].sourcevalues, idx)}"
 
         m_get = re.fullmatch(
-            r"(smu[ab])\.(measure\.delay|measure\.nplc|source\.func|source\.output|source\.rangev|source\.rangei|measure\.rangev|measure\.rangei)",
+            r"(smu[ab])\.(measure\.delay|measure\.nplc|measure\.autozero|source\.func|source\.output|source\.rangev|source\.rangei|measure\.rangev|measure\.rangei)",
             expr,
         )
         if m_get:
@@ -206,6 +207,7 @@ class Keithley2600(Instrument):
             mapping = {
                 "measure.delay": state.delay,
                 "measure.nplc": state.nplc,
+                "measure.autozero": state.measure_autozero,
                 "source.func": state.mode,
                 "source.output": state.output,
                 "source.rangev": state.source_rangev,
@@ -309,6 +311,10 @@ class Keithley2600(Instrument):
         if left == "measure.nplc":
             value = self._safe_float(right)
             state.nplc = value
+            return
+        if left == "measure.autozero":
+            value = self._safe_float(right)
+            state.measure_autozero = int(round(value))
             return
         if left == "source.func":
             value = self._safe_float(right)

@@ -1123,6 +1123,9 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
 
 def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
+    icon_path = os.path.join(os.path.dirname(__file__), "icons", "plotter_icon.ico")
+    if os.path.isfile(icon_path):
+        app.setWindowIcon(QtGui.QIcon(icon_path))
     initial_db_path: str | None = None
     args = sys.argv[1:]
     if args:

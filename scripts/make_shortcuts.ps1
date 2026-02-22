@@ -9,14 +9,18 @@ $wsh = New-Object -ComObject WScript.Shell
 
 $guiLink = Join-Path $desktop "Keithley GUI.lnk"
 $guiTarget = Join-Path $repoRoot "scripts\run_gui.bat"
+$guiIcon = Join-Path $repoRoot "icons\control_icon.ico"
 $guiShortcut = $wsh.CreateShortcut($guiLink)
 $guiShortcut.TargetPath = $guiTarget
 $guiShortcut.WorkingDirectory = $repoRoot
+$guiShortcut.IconLocation = "$guiIcon,0"
 $guiShortcut.Save()
 
 $plotLink = Join-Path $desktop "Keithley Plotter.lnk"
 $plotTarget = Join-Path $repoRoot "scripts\run_plotter.bat"
+$plotIcon = Join-Path $repoRoot "icons\plotter_icon.ico"
 $plotShortcut = $wsh.CreateShortcut($plotLink)
 $plotShortcut.TargetPath = $plotTarget
 $plotShortcut.WorkingDirectory = $repoRoot
+$plotShortcut.IconLocation = "$plotIcon,0"
 $plotShortcut.Save()

@@ -2,11 +2,11 @@
   "channels": [
     {
       "channel_name": "keithley1.smua",
-      "independent": false,
       "link_next": false,
       "name": "keithley1.smua",
       "state": {
         "channel_name": "keithley1.smua",
+        "csv_path": "",
         "dV": "0.1",
         "first_node": "1",
         "n_high": "10",
@@ -29,7 +29,6 @@
     },
     {
       "channel_name": "keithley1.smub",
-      "independent": false,
       "link_next": false,
       "name": "keithley1.smub",
       "state": {
@@ -56,7 +55,6 @@
     },
     {
       "channel_name": "keithley2.smua",
-      "independent": false,
       "link_next": false,
       "name": "keithley2.smua",
       "state": {
@@ -83,7 +81,6 @@
     },
     {
       "channel_name": "keithley2.smub",
-      "independent": false,
       "link_next": false,
       "name": "keithley2.smub",
       "state": {
@@ -113,13 +110,15 @@
     "delayNPLC_ratio": "0.8",
     "dt_list": "0.5",
     "ramp_down": false,
+    "ramp_dt": "1e-3",
+    "ramp_dv": "5e-5",
     "ramp_up": true,
     "repeat": "1",
     "round_delay": "0",
-    "time_independent": false
+    "waveform_layout": "overlay"
   },
   "paths": {
-    "csv_path": "../_data/csv/sim/test.csv",
+    "csv_path": "",
     "db_path": "../_data/db/sim/test.db",
     "device_name": "test",
     "exp_name": "test",
