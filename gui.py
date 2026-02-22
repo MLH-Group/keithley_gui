@@ -95,7 +95,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Arbitrary Sweeper Trigger GUI")
+        self.setWindowTitle("Keithley Control")
 
         self.station: Station | None = None
         self.keithleys: dict[str, Any] = {}

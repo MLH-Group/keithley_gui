@@ -180,15 +180,21 @@ def build_traces(
     groups = build_groups(configs)
 
     sequence: list[tuple[float, ...]] = []
+    t_vals: list[float] = []
+    time = 0.0
     for _dt in dt_list:
         for _rep in range(repeat):
             seq = iterate_groups(groups, v_ranges)
-            sequence.extend(seq)
+            for item in seq:
+                sequence.append(item)
+                t_vals.append(time)
+                time += _dt
             if round_delay > 0:
+                time += round_delay
                 sequence.append(tuple(v[-1] for v in v_ranges))
+                t_vals.append(time)
 
-    dt = dt_list[0]
-    t = np.arange(len(sequence)) * dt
+    t = np.array(t_vals, dtype=float)
 
     traces: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     for idx, cfg in enumerate(configs):

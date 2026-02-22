@@ -7,7 +7,7 @@ $repoRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
 $desktop = [Environment]::GetFolderPath("Desktop")
 $wsh = New-Object -ComObject WScript.Shell
 
-$guiLink = Join-Path $desktop "Keithley GUI.lnk"
+$guiLink = Join-Path $desktop "Keithley Control.lnk"
 $guiTarget = Join-Path $repoRoot "scripts\run_gui.bat"
 $guiIcon = Join-Path $repoRoot "icons\control_icon.ico"
 $guiShortcut = $wsh.CreateShortcut($guiLink)

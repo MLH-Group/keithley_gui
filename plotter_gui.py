@@ -196,7 +196,7 @@ class LivePlotCanvas(FigureCanvasQTAgg):
 class LivePlotterGUI(QtWidgets.QMainWindow):
     def __init__(self, initial_db_path: str | None = None) -> None:
         super().__init__()
-        self.setWindowTitle("QCoDeS Live Plotter")
+        self.setWindowTitle("Keithley Plotter")
         self.setAcceptDrops(True)
 
         self.reader = DatabaseReader()
