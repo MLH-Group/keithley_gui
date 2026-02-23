@@ -4,6 +4,7 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "REPO_DIR=%%~fI"
 set "ENV_NAME=keithley_labtools"
 set "SETUPTOOLS_SPEC=setuptools<81"
+set "CONDA_FORGE_ARGS=--override-channels -c conda-forge"
 
 set "CONDA_BAT="
 call "%SCRIPT_DIR%find_conda.bat"
@@ -40,7 +41,7 @@ call :verify_pkg_resources
 if errorlevel 1 (
   echo.
   echo pkg_resources missing. Attempting conda repair install...
-  call "%CONDA_BAT%" install -n %ENV_NAME% "%SETUPTOOLS_SPEC%" -y
+  call "%CONDA_BAT%" install -n %ENV_NAME% %CONDA_FORGE_ARGS% "%SETUPTOOLS_SPEC%" -y
   if errorlevel 1 goto :error
 
   call :verify_pkg_resources
@@ -48,7 +49,7 @@ if errorlevel 1 (
     echo.
     echo pkg_resources still missing after conda repair.
     echo Attempting conda force-reinstall of %SETUPTOOLS_SPEC%...
-    call "%CONDA_BAT%" install -n %ENV_NAME% --force-reinstall "%SETUPTOOLS_SPEC%" -y
+    call "%CONDA_BAT%" install -n %ENV_NAME% %CONDA_FORGE_ARGS% --force-reinstall "%SETUPTOOLS_SPEC%" -y
     if not errorlevel 1 (
       call :verify_pkg_resources
     )
