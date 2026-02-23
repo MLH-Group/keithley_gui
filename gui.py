@@ -675,6 +675,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             first_node = float(state["first_node"])
             second_node = float(state["second_node"])
             dV = float(state["dV"])
+            v_inc = float(state["v_inc"])
+            n_repeat = int(state["n_repeat"])
             v_high = float(state["v_high"])
             v_low = float(state["v_low"])
             n_high = int(state["n_high"])
@@ -702,6 +704,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                     first_node=first_node,
                     second_node=second_node,
                     dV=dV,
+                    v_inc=v_inc,
+                    n_repeat=n_repeat,
                     v_high=v_high,
                     v_low=v_low,
                     v_mid=v_mid,
@@ -803,10 +807,14 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.tri_first = QtWidgets.QLineEdit("0.0")
         self.tri_second = QtWidgets.QLineEdit("0.0")
         self.tri_dv = QtWidgets.QLineEdit("0.0")
+        self.tri_v_inc = QtWidgets.QLineEdit("0.0")
+        self.tri_n_repeat = QtWidgets.QLineEdit("1")
         tri_layout.addRow("Start V", self.tri_start)
         tri_layout.addRow("First Node", self.tri_first)
         tri_layout.addRow("Second Node", self.tri_second)
         tri_layout.addRow("dV", self.tri_dv)
+        tri_layout.addRow("v_inc", self.tri_v_inc)
+        tri_layout.addRow("n_repeat", self.tri_n_repeat)
 
         # Square params
         self.square_group = QtWidgets.QGroupBox("Square Params")
@@ -897,6 +905,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.tri_first.setText(str(state["first_node"]))
         self.tri_second.setText(str(state["second_node"]))
         self.tri_dv.setText(str(state["dV"]))
+        self.tri_v_inc.setText(str(state["v_inc"]))
+        self.tri_n_repeat.setText(str(state["n_repeat"]))
 
         self.sq_v_high.setText(str(state["v_high"]))
         self.sq_v_low.setText(str(state["v_low"]))
@@ -932,6 +942,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         state["first_node"] = self.tri_first.text()
         state["second_node"] = self.tri_second.text()
         state["dV"] = self.tri_dv.text()
+        state["v_inc"] = self.tri_v_inc.text()
+        state["n_repeat"] = self.tri_n_repeat.text()
 
         if waveform.lower() == "square-3":
             state["v_high"] = self.sq3_v_high.text()
@@ -984,7 +996,10 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         state = item.data(QtCore.Qt.UserRole)
         if not isinstance(state, dict):
             state = self._default_row_state(item.text())
-            item.setData(QtCore.Qt.UserRole, state)
+        merged = self._default_row_state(item.text())
+        merged.update(state)
+        state = merged
+        item.setData(QtCore.Qt.UserRole, state)
         state["channel_name"] = item.text()
         state["waveform"] = self._get_waveform_value(row)
         return state
@@ -1005,6 +1020,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             "first_node": "0.0",
             "second_node": "0.0",
             "dV": "0.0",
+            "v_inc": "0.0",
+            "n_repeat": "1",
             "v_high": "0.0",
             "v_low": "0.0",
             "v_mid": "0.0",

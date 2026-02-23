@@ -17,6 +17,8 @@ class ChannelConfig:
     first_node: float
     second_node: float
     dV: float
+    v_inc: float
+    n_repeat: int
     v_high: float
     v_low: float
     v_mid: float
@@ -46,16 +48,28 @@ def build_v_range(cfg: ChannelConfig, square_final_low: bool = True) -> np.ndarr
     if cfg.waveform.lower() == "fixed":
         return np.array([cfg.v_fixed], dtype=float)
 
-    if cfg.dV == 0:
-        return np.array([cfg.start_voltage], dtype=float)
+    return build_triangle_wave(cfg)
 
-    n = 1 + abs(int((cfg.first_node - cfg.start_voltage) / cfg.dV))
-    v_range1 = np.linspace(cfg.start_voltage, cfg.first_node, n)[:-1]
-    n = 1 + abs(int((cfg.second_node - cfg.first_node) / cfg.dV))
-    v_range2 = np.linspace(cfg.first_node, cfg.second_node, n)[:-1]
-    n = 1 + abs(int((cfg.start_voltage - cfg.second_node) / cfg.dV))
-    v_range3 = np.linspace(cfg.second_node, cfg.start_voltage, n)
-    return np.concatenate((v_range1, v_range2, v_range3))
+
+def build_triangle_wave(cfg: ChannelConfig) -> np.ndarray:
+    if cfg.dV == 0:
+        base = np.array([cfg.start_voltage], dtype=float)
+    else:
+        n = 1 + abs(int((cfg.first_node - cfg.start_voltage) / cfg.dV))
+        v_range1 = np.linspace(cfg.start_voltage, cfg.first_node, n)[:-1]
+        n = 1 + abs(int((cfg.second_node - cfg.first_node) / cfg.dV))
+        v_range2 = np.linspace(cfg.first_node, cfg.second_node, n)[:-1]
+        n = 1 + abs(int((cfg.start_voltage - cfg.second_node) / cfg.dV))
+        v_range3 = np.linspace(cfg.second_node, cfg.start_voltage, n)
+        base = np.concatenate((v_range1, v_range2, v_range3))
+
+    n_repeat = max(1, int(cfg.n_repeat))
+    v_inc = float(cfg.v_inc)
+    if n_repeat == 1:
+        return base
+
+    cycles = [base + (idx * v_inc) for idx in range(n_repeat)]
+    return np.concatenate(cycles)
 
 
 def build_square_wave(cfg: ChannelConfig, include_final_low: bool = True) -> np.ndarray:
