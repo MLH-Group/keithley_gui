@@ -922,7 +922,22 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         mask = self._mask_valid(x, y, log_x=log_x, log_y=log_y)
         if mask.any():
             return x, y, mask
+
+        # Some QCoDeS result tables are sparse for dependent parameters:
+        # x and y can be written on alternating rows, so there are no rows
+        # where both are finite. Filling both vectors creates duplicated
+        # stair-step points. Prefer real y samples (dependent) and fill only x.
         x_fill = self._nearest_fill(x)
+        y_real = np.isfinite(y)
+        if y_real.any():
+            mask = y_real & np.isfinite(x_fill)
+            if log_x:
+                mask &= x_fill > 0
+            if log_y:
+                mask &= y > 0
+            if mask.any():
+                return x_fill, y, mask
+
         y_fill = self._nearest_fill(y)
         mask = self._mask_valid(x_fill, y_fill, log_x=log_x, log_y=log_y)
         return x_fill, y_fill, mask
