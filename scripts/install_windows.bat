@@ -5,6 +5,7 @@ for %%I in ("%SCRIPT_DIR%..") do set "REPO_DIR=%%~fI"
 set "ENV_NAME=keithley_labtools"
 set "SETUPTOOLS_SPEC=setuptools<81"
 set "CONDA_FORGE_ARGS=--override-channels -c conda-forge"
+set "QCODES_SPEC=qcodes>=0.38"
 
 set "CONDA_BAT="
 call "%SCRIPT_DIR%find_conda.bat"
@@ -68,6 +69,29 @@ if errorlevel 1 (
 if errorlevel 1 goto :error
 
 echo.
+echo Verifying qcodes.dataset...
+call :verify_qcodes
+if errorlevel 1 (
+  echo.
+  echo qcodes.dataset missing. Attempting conda repair install...
+  call "%CONDA_BAT%" install -n %ENV_NAME% %CONDA_FORGE_ARGS% "%QCODES_SPEC%" -y
+  if errorlevel 1 goto :error
+
+  call :verify_qcodes
+  if errorlevel 1 (
+    echo.
+    echo qcodes.dataset still missing after conda repair.
+    echo Attempting pip force-reinstall of qcodes...
+    call "%CONDA_BAT%" run -n %ENV_NAME% python -m pip install --upgrade --force-reinstall "%QCODES_SPEC%"
+    if errorlevel 1 goto :error
+
+    call :verify_qcodes
+    if errorlevel 1 goto :qcodes_error
+  )
+)
+if errorlevel 1 goto :error
+
+echo.
 echo Verifying pyvisa...
 call :verify_pyvisa
 if errorlevel 1 (
@@ -113,9 +137,19 @@ exit /b %errorlevel%
 call "%CONDA_BAT%" run -n %ENV_NAME% python -c "import importlib, sys, pyvisa; sys.modules.setdefault('visa', pyvisa); sys.modules.setdefault('Visa', pyvisa); importlib.import_module('visa'); importlib.import_module('Visa'); print('pyvisa version:', pyvisa.__version__)"
 exit /b %errorlevel%
 
+:verify_qcodes
+call "%CONDA_BAT%" run -n %ENV_NAME% python -c "import importlib.util, qcodes, sys; spec=importlib.util.find_spec('qcodes.dataset'); print('qcodes version:', qcodes.__version__); print('qcodes path:', qcodes.__file__); print('qcodes.dataset module:', spec.origin if spec else 'missing'); sys.exit(0 if spec else 1)"
+exit /b %errorlevel%
+
 :pkg_resources_error
 echo.
 echo pkg_resources is still unavailable after repair attempts.
+echo Please send this output to support so we can diagnose the Python environment.
+goto :error
+
+:qcodes_error
+echo.
+echo qcodes.dataset is still unavailable after repair attempts.
 echo Please send this output to support so we can diagnose the Python environment.
 goto :error
 

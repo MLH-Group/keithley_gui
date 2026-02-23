@@ -11,7 +11,7 @@ dependencies:
   - pandas
   - matplotlib
   - pyqt=5
-  - qcodes
+  - qcodes>=0.38
   - pyvisa
   - pyvisa-py
   - pyserial

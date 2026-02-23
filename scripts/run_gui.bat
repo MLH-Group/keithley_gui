@@ -2,6 +2,7 @@
 setlocal
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "REPO_DIR=%%~fI"
+set "ENV_NAME=keithley_labtools"
 
 set "CONDA_BAT="
 call "%SCRIPT_DIR%find_conda.bat"
@@ -16,10 +17,16 @@ if not defined CONDA_BAT (
   exit /b 1
 )
 
-call "%CONDA_BAT%" activate keithley_labtools
-if errorlevel 1 exit /b 1
-
-set "PYTHON_EXE=python"
+echo.
+echo Environment diagnostics:
+call "%CONDA_BAT%" run -n %ENV_NAME% python -c "import importlib.util, sys, qcodes; spec=importlib.util.find_spec('qcodes.dataset'); print('python exe:', sys.executable); print('qcodes version:', qcodes.__version__); print('qcodes path:', qcodes.__file__); print('qcodes.dataset module:', spec.origin if spec else 'missing'); sys.exit(0 if spec else 1)"
+if errorlevel 1 (
+  echo.
+  echo Environment check failed for "%ENV_NAME%".
+  echo Please re-run install_windows.bat to repair the environment.
+  pause
+  exit /b 1
+)
 
 echo.
 echo Launching Keithley GUI...
@@ -27,7 +34,7 @@ echo (If it fails, errors will be shown here.)
 echo.
 
 pushd "%REPO_DIR%"
-%PYTHON_EXE% "%REPO_DIR%\k_gui.py"
+call "%CONDA_BAT%" run -n %ENV_NAME% python "%REPO_DIR%\k_gui.py"
 set "RC=%ERRORLEVEL%"
 popd
 
