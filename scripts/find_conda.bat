@@ -1,5 +1,4 @@
 @echo off
-setlocal
 
 set "FOUND_CONDA_BAT="
 
@@ -55,10 +54,8 @@ if not defined FOUND_CONDA_BAT if exist "C:\Miniconda3\Scripts\conda.bat" set "F
 if not defined FOUND_CONDA_BAT if exist "C:\Anaconda3\condabin\conda.bat" set "FOUND_CONDA_BAT=C:\Anaconda3\condabin\conda.bat"
 if not defined FOUND_CONDA_BAT if exist "C:\Anaconda3\Scripts\conda.bat" set "FOUND_CONDA_BAT=C:\Anaconda3\Scripts\conda.bat"
 
-endlocal & (
-  if defined FOUND_CONDA_BAT (
-    set "CONDA_BAT=%FOUND_CONDA_BAT%"
-    exit /b 0
-  )
+if defined FOUND_CONDA_BAT (
+  set "CONDA_BAT=%FOUND_CONDA_BAT%"
+  exit /b 0
 )
 exit /b 1
