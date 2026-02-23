@@ -927,16 +927,57 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         # x and y can be written on alternating rows, so there are no rows
         # where both are finite. Filling both vectors creates duplicated
         # stair-step points. Prefer real y samples (dependent) and fill only x.
-        x_fill = self._nearest_fill(x)
         y_real = np.isfinite(y)
         if y_real.any():
-            mask = y_real & np.isfinite(x_fill)
-            if log_x:
-                mask &= x_fill > 0
-            if log_y:
-                mask &= y > 0
-            if mask.any():
+            x_ref = x[np.isfinite(x)]
+            x_forward = self._forward_fill(x)
+            x_backward = self._forward_fill(x[::-1])[::-1]
+
+            # If the first real y appears before the first real x, prefer
+            # backward fill on ties; otherwise prefer forward fill.
+            x_idx = np.flatnonzero(np.isfinite(x))
+            y_idx = np.flatnonzero(y_real)
+            prefer_backward = (
+                x_idx.size > 0 and y_idx.size > 0 and y_idx[0] < x_idx[0]
+            )
+            candidates = (
+                (x_backward, "backward"),
+                (x_forward, "forward"),
+            ) if prefer_backward else (
+                (x_forward, "forward"),
+                (x_backward, "backward"),
+            )
+
+            best: tuple[float, np.ndarray, np.ndarray] | None = None
+            for x_candidate, _name in candidates:
+                cand_mask = y_real & np.isfinite(x_candidate)
+                if log_x:
+                    cand_mask &= x_candidate > 0
+                if log_y:
+                    cand_mask &= y > 0
+                if not cand_mask.any():
+                    continue
+                score = 0.0
+                if x_ref.size > 0:
+                    x_obs = x_candidate[cand_mask]
+                    n = min(x_obs.size, x_ref.size)
+                    if n > 0:
+                        start_err = float(
+                            np.nanmean(np.abs(x_obs[:n] - x_ref[:n]))
+                        )
+                        end_err = float(
+                            np.nanmean(np.abs(x_obs[-n:] - x_ref[-n:]))
+                        )
+                        score = min(start_err, end_err)
+                item = (score, x_candidate, cand_mask)
+                if best is None or item[0] < best[0]:
+                    best = item
+
+            if best is not None:
+                _, x_fill, mask = best
                 return x_fill, y, mask
+
+        x_fill = self._nearest_fill(x)
 
         y_fill = self._nearest_fill(y)
         mask = self._mask_valid(x_fill, y_fill, log_x=log_x, log_y=log_y)

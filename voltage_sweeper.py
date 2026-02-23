@@ -141,8 +141,6 @@ class RunWorker(QtCore.QObject):
                 for sweeper in sweepers:
                     utilities.ramp_voltage(sweeper["channel"], sweeper["v_range"][0])
 
-            time_param.reset_clock()
-
             for sweeper in sweepers:
                 ch = sweeper["channel"]
                 trigger_fns.source_trig_params(ch)
@@ -151,7 +149,27 @@ class RunWorker(QtCore.QObject):
             channels = [s["channel"] for s in sweepers]
 
             plan = build_plan(self.configs, self.dt_list, self.repeat, self.round_delay)
+            first_measure = next(
+                (entry for entry in plan if entry.get("type") == "measure"),
+                None,
+            )
             last_dt = None
+
+            if first_measure is not None and not self._stop_requested:
+                self.status.emit("Priming first-point calibration...")
+                prime_dt = float(first_measure["dt"])
+                self._set_ktime(sweepers_save_order, prime_dt, self.delay_ratio)
+                self._prime_first_point(
+                    tuple(first_measure["volt"]),
+                    sweepers,
+                    sweepers_save_order,
+                    list(self.keithleys.values()),
+                    channels,
+                )
+                last_dt = prime_dt
+
+            time_param.reset_clock()
+            self.status.emit("Running")
 
             with meas_forward.run() as forward_saver:
                 while self._step_index < len(plan):
@@ -250,3 +268,23 @@ class RunWorker(QtCore.QObject):
         for sweeper in sweepers:
             sweeper["channel"].delay(delay)
             sweeper["channel"].nplc(nplc_set)
+
+    @staticmethod
+    def _prime_first_point(
+        voltages: tuple[float, ...],
+        sweepers: list[dict[str, Any]],
+        sweepers_save_order: list[dict[str, Any]],
+        keithleys: list[Any],
+        channels: list[Any],
+    ) -> None:
+        for x, sweeper in zip(voltages, sweepers):
+            trigger_fns.set_v(sweeper["channel"], x)
+
+        trigger_fns.trigger(keithleys, channels)
+
+        # Intentionally discard: this primes first-point autocalibration
+        # before saved data acquisition starts.
+        for sweeper in sweepers_save_order:
+            v, j = trigger_fns.recall_buffer(sweeper["channel"])
+            float(v)
+            float(j)

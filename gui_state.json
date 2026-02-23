@@ -119,10 +119,10 @@
   },
   "paths": {
     "csv_path": "",
-    "db_path": "../_data/db/sim/test.db",
+    "db_path": "../db/test/test.db",
     "device_name": "test",
     "exp_name": "test",
-    "yaml_path": "electrochemistry.station.sim.yaml"
+    "yaml_path": "electrochemistry.station.yaml"
   },
   "version": 1
 }
