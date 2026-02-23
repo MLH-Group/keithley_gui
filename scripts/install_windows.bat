@@ -67,6 +67,29 @@ if errorlevel 1 (
 )
 if errorlevel 1 goto :error
 
+echo.
+echo Verifying pyvisa...
+call :verify_pyvisa
+if errorlevel 1 (
+  echo.
+  echo pyvisa missing. Attempting conda repair install...
+  call "%CONDA_BAT%" install -n %ENV_NAME% %CONDA_FORGE_ARGS% pyvisa pyvisa-py -y
+  if errorlevel 1 goto :error
+
+  call :verify_pyvisa
+  if errorlevel 1 (
+    echo.
+    echo pyvisa still missing after conda repair.
+    echo Attempting pip force-reinstall of pyvisa and pyvisa-py...
+    call "%CONDA_BAT%" run -n %ENV_NAME% python -m pip install --upgrade --force-reinstall pyvisa pyvisa-py
+    if errorlevel 1 goto :error
+
+    call :verify_pyvisa
+    if errorlevel 1 goto :pyvisa_error
+  )
+)
+if errorlevel 1 goto :error
+
 set "REPO_DIR=%REPO_DIR%"
 call "%CONDA_BAT%" run -n %ENV_NAME% python -c "import os, site, pathlib; p=pathlib.Path(site.getsitepackages()[0])/'keithley_gui.pth'; p.write_text(os.environ['REPO_DIR'])"
 if errorlevel 1 goto :error
@@ -86,9 +109,19 @@ exit /b 0
 call "%CONDA_BAT%" run -n %ENV_NAME% python -c "import importlib.util, setuptools, sys; spec=importlib.util.find_spec('pkg_resources'); print('setuptools version:', setuptools.__version__); print('pkg_resources module:', spec.origin if spec else 'missing'); sys.exit(0 if spec else 1)"
 exit /b %errorlevel%
 
+:verify_pyvisa
+call "%CONDA_BAT%" run -n %ENV_NAME% python -c "import importlib, sys, pyvisa; sys.modules.setdefault('visa', pyvisa); sys.modules.setdefault('Visa', pyvisa); importlib.import_module('visa'); importlib.import_module('Visa'); print('pyvisa version:', pyvisa.__version__)"
+exit /b %errorlevel%
+
 :pkg_resources_error
 echo.
 echo pkg_resources is still unavailable after repair attempts.
+echo Please send this output to support so we can diagnose the Python environment.
+goto :error
+
+:pyvisa_error
+echo.
+echo pyvisa is still unavailable after repair attempts.
 echo Please send this output to support so we can diagnose the Python environment.
 goto :error
 
