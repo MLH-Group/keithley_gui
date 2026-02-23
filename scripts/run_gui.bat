@@ -3,21 +3,20 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "REPO_DIR=%%~fI"
 
-set "CONDA_ACTIVATE="
-if exist "%USERPROFILE%\miniforge3\Scripts\activate.bat" set "CONDA_ACTIVATE=%USERPROFILE%\miniforge3\Scripts\activate.bat"
-if not defined CONDA_ACTIVATE if exist "%USERPROFILE%\miniconda3\Scripts\activate.bat" set "CONDA_ACTIVATE=%USERPROFILE%\miniconda3\Scripts\activate.bat"
-if not defined CONDA_ACTIVATE if exist "%USERPROFILE%\anaconda3\Scripts\activate.bat" set "CONDA_ACTIVATE=%USERPROFILE%\anaconda3\Scripts\activate.bat"
+set "CONDA_BAT="
+call "%SCRIPT_DIR%find_conda.bat"
 
-if not defined CONDA_ACTIVATE (
+if not defined CONDA_BAT (
   echo.
-  echo Could not find conda activation script.
-  echo Please install Miniforge or Miniconda, then re-run install_windows.bat.
+  echo Could not find conda.
+  echo Checked PATH/CONDA_EXE and common Miniforge/Miniconda/Anaconda locations.
+  echo Please install Miniforge or add conda to PATH, then re-run install_windows.bat.
   echo.
   pause
   exit /b 1
 )
 
-call "%CONDA_ACTIVATE%" keithley_labtools
+call "%CONDA_BAT%" activate keithley_labtools
 if errorlevel 1 exit /b 1
 
 set "PYTHON_EXE=python"

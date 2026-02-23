@@ -4,14 +4,13 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "REPO_DIR=%%~fI"
 
 set "CONDA_BAT="
-for %%I in (conda.bat) do set "CONDA_BAT=%%~$PATH:I"
-if not defined CONDA_BAT if exist "%USERPROFILE%\miniforge3\Scripts\conda.bat" set "CONDA_BAT=%USERPROFILE%\miniforge3\Scripts\conda.bat"
-if not defined CONDA_BAT if exist "%USERPROFILE%\miniconda3\Scripts\conda.bat" set "CONDA_BAT=%USERPROFILE%\miniconda3\Scripts\conda.bat"
-if not defined CONDA_BAT if exist "%USERPROFILE%\anaconda3\Scripts\conda.bat" set "CONDA_BAT=%USERPROFILE%\anaconda3\Scripts\conda.bat"
+call "%SCRIPT_DIR%find_conda.bat"
 
 if not defined CONDA_BAT (
   echo.
-  echo Could not find conda. Please install Miniforge or Miniconda first.
+  echo Could not find conda.
+  echo Checked PATH/CONDA_EXE and common Miniforge/Miniconda/Anaconda locations.
+  echo Install Miniforge or add your existing conda install to PATH, then retry.
   echo https://conda-forge.org/miniforge/
   echo.
   pause
