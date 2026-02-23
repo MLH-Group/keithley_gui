@@ -3,6 +3,7 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "REPO_DIR=%%~fI"
 set "ENV_NAME=keithley_labtools"
+set "SETUPTOOLS_SPEC=setuptools<81"
 
 set "CONDA_BAT="
 call "%SCRIPT_DIR%find_conda.bat"
@@ -39,23 +40,23 @@ call :verify_pkg_resources
 if errorlevel 1 (
   echo.
   echo pkg_resources missing. Attempting conda repair install...
-  call "%CONDA_BAT%" install -n %ENV_NAME% setuptools -y
+  call "%CONDA_BAT%" install -n %ENV_NAME% "%SETUPTOOLS_SPEC%" -y
   if errorlevel 1 goto :error
 
   call :verify_pkg_resources
   if errorlevel 1 (
     echo.
     echo pkg_resources still missing after conda repair.
-    echo Attempting conda force-reinstall of setuptools...
-    call "%CONDA_BAT%" install -n %ENV_NAME% --force-reinstall setuptools -y
+    echo Attempting conda force-reinstall of %SETUPTOOLS_SPEC%...
+    call "%CONDA_BAT%" install -n %ENV_NAME% --force-reinstall "%SETUPTOOLS_SPEC%" -y
     if not errorlevel 1 (
       call :verify_pkg_resources
     )
 
     if errorlevel 1 (
       echo.
-      echo Attempting pip force-reinstall of setuptools...
-      call "%CONDA_BAT%" run -n %ENV_NAME% python -m pip install --upgrade --force-reinstall setuptools
+      echo Attempting pip force-reinstall of %SETUPTOOLS_SPEC%...
+      call "%CONDA_BAT%" run -n %ENV_NAME% python -m pip install --upgrade --force-reinstall "%SETUPTOOLS_SPEC%"
       if errorlevel 1 goto :error
 
       call :verify_pkg_resources
@@ -81,7 +82,7 @@ pause >nul
 exit /b 0
 
 :verify_pkg_resources
-call "%CONDA_BAT%" run -n %ENV_NAME% python -c "import pkg_resources, setuptools; print('pkg_resources ok:', pkg_resources.__file__); print('setuptools version:', setuptools.__version__)"
+call "%CONDA_BAT%" run -n %ENV_NAME% python -c "import importlib.util, setuptools, sys; spec=importlib.util.find_spec('pkg_resources'); print('setuptools version:', setuptools.__version__); print('pkg_resources module:', spec.origin if spec else 'missing'); sys.exit(0 if spec else 1)"
 exit /b %errorlevel%
 
 :pkg_resources_error
