@@ -13,6 +13,8 @@ class ChannelConfig:
     channel_name: str
     name: str
     waveform: str
+    measure_voltage: bool
+    measure_current: bool
     start_voltage: float
     first_node: float
     second_node: float

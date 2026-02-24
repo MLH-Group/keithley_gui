@@ -33,11 +33,19 @@ def setup_database_registers_arb(station, test_exp, sweepers, time_independent=F
 
     for sweeper in sweepers:
         channel = sweeper["channel"]
-        if "nano" not in sweeper["name"] or "temperature" in sweeper["name"]:
+        measure_current = bool(sweeper.get("measure_current", True))
+        measure_voltage = bool(sweeper.get("measure_voltage", False))
+        if measure_current and (
+            "nano" not in sweeper["name"] or "temperature" in sweeper["name"]
+        ):
             meas_forward.register_parameter(channel.curr, setpoints=(*independent_params,))
-        if "temperature" in sweeper["name"]:
+        if measure_current and "temperature" in sweeper["name"]:
             meas_forward.register_parameter(
                 channel.temperature, setpoints=(*independent_params,)
+            )
+        if measure_voltage:
+            meas_forward.register_parameter(
+                channel.meas_v, setpoints=(*independent_params,)
             )
         if not sweeper["independent"]:
             meas_forward.register_parameter(channel.volt, setpoints=(*independent_params,))

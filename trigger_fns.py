@@ -1,10 +1,14 @@
 def abort(chan):
     chan.write(f"{chan.channel}.abort()")
 
-def meas_trig_params(chan):
+def set_measure_mode(chan, mode: str) -> None:
+    chan.write(f"{chan.channel}.trigger.measure.{mode}({chan.channel}.nvbuffer1)")
+
+
+def meas_trig_params(chan, mode: str = "i") -> None:
     #setup buffer
     chan.write(f"{chan.channel}.measure.autozero = 1")
-    chan.write(f"{chan.channel}.trigger.measure.i({chan.channel}.nvbuffer1)")
+    set_measure_mode(chan, mode)
     chan.write(f"{chan.channel}.nvbuffer1.appendmode = 1")
 
     #clear any residual values

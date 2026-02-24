@@ -25,6 +25,8 @@ def build_sweepers(
             {
                 "channel": channel,
                 "name": cfg.name,
+                "measure_voltage": cfg.measure_voltage,
+                "measure_current": cfg.measure_current,
                 "first_node": cfg.first_node,
                 "second_node": cfg.second_node,
                 "start_voltage": cfg.start_voltage,
@@ -146,9 +148,10 @@ class RunWorker(QtCore.QObject):
             for sweeper in sweepers:
                 ch = sweeper["channel"]
                 trigger_fns.source_trig_params(ch)
-                trigger_fns.meas_trig_params(ch)
-
-            channels = [s["channel"] for s in sweepers]
+                initial_mode = "i"
+                if sweeper.get("measure_voltage") and not sweeper.get("measure_current"):
+                    initial_mode = "v"
+                trigger_fns.meas_trig_params(ch, initial_mode)
 
             plan = build_plan(self.configs, self.dt_list, self.repeat, self.round_delay)
             last_dt = None
@@ -163,7 +166,6 @@ class RunWorker(QtCore.QObject):
                         sweepers, sweepers_save_order = build_sweepers(
                             self.configs, self.keithleys
                         )
-                        channels = [s["channel"] for s in sweepers]
                         plan = build_plan(
                             self.configs, self.dt_list, self.repeat, self.round_delay
                         )
@@ -194,25 +196,77 @@ class RunWorker(QtCore.QObject):
                     t = time_param()
                     get_readings = []
                     independent_params = []
+                    step_source_values: dict[Any, float] = {}
+                    measured_volt: dict[Any, float] = {}
+                    measured_curr: dict[Any, float] = {}
+                    source_vals: dict[Any, float] = {}
 
-                    trigger_fns.trigger(list(self.keithleys.values()), channels)
+                    for x, sweeper in zip(entry["volt"], sweepers):
+                        step_source_values[sweeper["channel"]] = float(x)
+
+                    meas_v_sweepers = [
+                        s for s in sweepers_save_order if s.get("measure_voltage")
+                    ]
+                    meas_i_sweepers = [
+                        s for s in sweepers_save_order if s.get("measure_current")
+                    ]
+
+                    if meas_v_sweepers:
+                        for sweeper in meas_v_sweepers:
+                            trigger_fns.set_measure_mode(sweeper["channel"], "v")
+                        trigger_fns.trigger(
+                            list(self.keithleys.values()),
+                            [s["channel"] for s in meas_v_sweepers],
+                        )
+                        for sweeper in meas_v_sweepers:
+                            source_v, reading = trigger_fns.recall_buffer(
+                                sweeper["channel"]
+                            )
+                            source_v = float(source_v)
+                            measured_volt[sweeper["channel"]] = float(reading)
+                            source_vals[sweeper["channel"]] = source_v
+
+                    if meas_i_sweepers:
+                        for sweeper in meas_i_sweepers:
+                            trigger_fns.set_measure_mode(sweeper["channel"], "i")
+                        trigger_fns.trigger(
+                            list(self.keithleys.values()),
+                            [s["channel"] for s in meas_i_sweepers],
+                        )
+                        for sweeper in meas_i_sweepers:
+                            source_v, reading = trigger_fns.recall_buffer(
+                                sweeper["channel"]
+                            )
+                            source_v = float(source_v)
+                            measured_curr[sweeper["channel"]] = float(reading)
+                            source_vals.setdefault(sweeper["channel"], source_v)
 
                     for sweeper in sweepers_save_order:
-                        v, j = trigger_fns.recall_buffer(sweeper["channel"])
-                        v = float(v)
-                        j = float(j)
-                        get_readings.append((sweeper["channel"].curr, j))
+                        ch = sweeper["channel"]
+                        measure_current = bool(sweeper.get("measure_current", True))
+                        measure_voltage = bool(sweeper.get("measure_voltage", False))
+                        source_v = source_vals.get(ch, step_source_values.get(ch, 0.0))
+                        v_used = measured_volt.get(ch, source_v)
+                        j = measured_curr.get(ch)
+                        if measure_current and (
+                            "nano" not in sweeper["name"]
+                            or "temperature" in sweeper["name"]
+                        ):
+                            if j is None:
+                                j = 0.0
+                            get_readings.append((ch.curr, j))
 
                         if sweeper["independent"]:
-                            independent_params.append((sweeper["channel"].volt, v))
+                            independent_params.append((ch.volt, source_v))
                         else:
-                            get_readings.append((sweeper["channel"].volt, v))
+                            get_readings.append((ch.volt, v_used))
 
-                        if "temperature" in sweeper["name"]:
-                            temperature = utilities.rToT(v / j) if j != 0 else 0.0
-                            get_readings.append(
-                                (sweeper["channel"].temperature, temperature)
-                            )
+                        if measure_voltage:
+                            get_readings.append((ch.meas_v, v_used))
+
+                        if "temperature" in sweeper["name"] and measure_current:
+                            temperature = utilities.rToT(v_used / j) if j else 0.0
+                            get_readings.append((ch.temperature, temperature))
 
                     forward_saver.add_result(
                         *independent_params,
@@ -245,8 +299,11 @@ class RunWorker(QtCore.QObject):
     def _set_ktime(
         sweepers: list[dict[str, Any]], dt_in: float, delay_ratio: float
     ) -> None:
-        nplc_set = dt_in * 50 * (1 - delay_ratio)
-        delay = dt_in - (nplc_set / 50)
         for sweeper in sweepers:
+            dt_effective = dt_in
+            if sweeper.get("measure_voltage") and sweeper.get("measure_current"):
+                dt_effective = dt_in / 2
+            nplc_set = dt_effective * 50 * (1 - delay_ratio)
+            delay = dt_effective - (nplc_set / 50)
             sweeper["channel"].delay(delay)
             sweeper["channel"].nplc(nplc_set)

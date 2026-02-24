@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import re
 import time
+import weakref
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 from qcodes.instrument import Instrument, InstrumentChannel
+from qcodes.parameters import ManualParameter
 
 
 @dataclass
@@ -51,6 +53,14 @@ class Keithley2600Channel(InstrumentChannel):
             get_cmd=f"{channel}.measure.v()",
             get_parser=float,
             set_cmd=f"{channel}.source.levelv={{}}",
+            snapshot_get=False,
+        )
+
+        self.add_parameter(
+            "meas_v",
+            parameter_class=ManualParameter,
+            label=f"MeasVoltage{parent}{channel}",
+            unit="V",
             snapshot_get=False,
         )
 
@@ -123,6 +133,7 @@ class Keithley2600(Instrument):
     MVP Keithley 2600 simulator for trigger-based sweeps.
     It preserves the interface shape used by this repo's notebooks.
     """
+    _sim_instances: "weakref.WeakSet[Keithley2600]" = weakref.WeakSet()
 
     def __init__(self, name: str, address: str, **kwargs: Any) -> None:
         super().__init__(name, **kwargs)
@@ -137,6 +148,7 @@ class Keithley2600(Instrument):
         self._offset = {"smua": 0.0, "smub": 0.0}
         self._noise_i = {"smua": 5e-9, "smub": 5e-9}
         self._noise_v = {"smua": 2e-6, "smub": 2e-6}
+        self.__class__._sim_instances.add(self)
 
         self._state: dict[str, _ChannelState] = {
             "smua": _ChannelState(),
@@ -227,7 +239,7 @@ class Keithley2600(Instrument):
         stmt = cmd.strip()
 
         if stmt == "*TRG":
-            self._trigger_bus()
+            self.__class__._trigger_all()
             return
 
         # No-op display commands used by the real driver.
@@ -356,12 +368,7 @@ class Keithley2600(Instrument):
 
         raise NotImplementedError(f"Simulator assignment not implemented: {ch}.{left}={right}")
 
-    def _trigger_bus(self) -> None:
-        # Simulate timing: wait for the largest configured delay across channels.
-        delays = [state.delay for state in self._state.values() if state.trigger_initiated]
-        if delays:
-            time.sleep(max(delays))
-
+    def _apply_trigger(self) -> None:
         for ch, state in self._state.items():
             if not state.trigger_initiated:
                 continue
@@ -377,6 +384,23 @@ class Keithley2600(Instrument):
             state.readings.append(reading)
             state.sourcevalues.append(source_v)
             state.trigger_initiated = False
+
+    @classmethod
+    def _trigger_all(cls) -> None:
+        # Simulate a shared trigger bus: wait once, then trigger all initiated channels.
+        durations = []
+        for inst in list(cls._sim_instances):
+            for state in inst._state.values():
+                if not state.trigger_initiated:
+                    continue
+                integration = (
+                    state.nplc / inst.linefreq_hz if inst.linefreq_hz else 0.0
+                )
+                durations.append(state.delay + integration)
+        if durations:
+            time.sleep(max(durations))
+        for inst in list(cls._sim_instances):
+            inst._apply_trigger()
 
     def _measure_now(self, ch: str, mode: str) -> float:
         state = self._state[ch]

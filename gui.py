@@ -91,7 +91,9 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
     COL_CHANNEL = 0
     COL_NAME = 1
     COL_WAVEFORM = 2
-    COL_LINK = 3
+    COL_MEAS_V = 3
+    COL_MEAS_I = 4
+    COL_LINK = 5
 
     def __init__(self) -> None:
         super().__init__()
@@ -214,12 +216,14 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(box)
 
         # Left table: compact channel list.
-        self.channel_table = QtWidgets.QTableWidget(0, 4)
+        self.channel_table = QtWidgets.QTableWidget(0, 6)
         self.channel_table.setHorizontalHeaderLabels(
             [
                 "Channel",
                 "Name",
                 "Waveform",
+                "Meas V",
+                "Meas I",
                 "Link Next",
             ]
         )
@@ -228,6 +232,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         header.setSectionResizeMode(self.COL_CHANNEL, QtWidgets.QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_NAME, QtWidgets.QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_WAVEFORM, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(self.COL_MEAS_V, QtWidgets.QHeaderView.Fixed)
+        header.setSectionResizeMode(self.COL_MEAS_I, QtWidgets.QHeaderView.Fixed)
         header.setSectionResizeMode(self.COL_LINK, QtWidgets.QHeaderView.Fixed)
         self._tune_channel_table_columns()
         self.channel_table.setSizePolicy(
@@ -271,8 +277,14 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         header = self.channel_table.horizontalHeader()
         self.channel_table.resizeColumnsToContents()
         metrics = QtGui.QFontMetrics(self.channel_table.font())
+        meas_v_text = self.channel_table.horizontalHeaderItem(self.COL_MEAS_V).text()
+        meas_v_width = metrics.horizontalAdvance(meas_v_text) + 22
+        meas_i_text = self.channel_table.horizontalHeaderItem(self.COL_MEAS_I).text()
+        meas_i_width = metrics.horizontalAdvance(meas_i_text) + 22
         link_text = self.channel_table.horizontalHeaderItem(self.COL_LINK).text()
         link_width = metrics.horizontalAdvance(link_text) + 22
+        header.resizeSection(self.COL_MEAS_V, meas_v_width)
+        header.resizeSection(self.COL_MEAS_I, meas_i_width)
         header.resizeSection(self.COL_LINK, link_width)
 
     def _build_options_block(self) -> QtWidgets.QGroupBox:
@@ -416,6 +428,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             channel_name = self._get_table_text(row, self.COL_CHANNEL, f"row{row}")
             name = self._get_table_text(row, self.COL_NAME, channel_name)
             waveform = self._get_waveform_value(row)
+            measure_voltage = self._get_check_state(row, self.COL_MEAS_V)
+            measure_current = self._get_check_state(row, self.COL_MEAS_I)
             link_next = self._get_check_state(row, self.COL_LINK)
             state = dict(self._get_row_state(row))
             state["channel_name"] = channel_name
@@ -425,6 +439,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                     "channel_name": channel_name,
                     "name": name,
                     "waveform": waveform,
+                    "measure_voltage": measure_voltage,
+                    "measure_current": measure_current,
                     "link_next": link_next,
                     "state": state,
                 }
@@ -507,6 +523,27 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         combo.setProperty("row", row)
         combo.currentTextChanged.connect(self._on_waveform_changed_for_widget)
         self.channel_table.setCellWidget(row, self.COL_WAVEFORM, combo)
+
+        measure_voltage = data.get("measure_voltage")
+        measure_current = data.get("measure_current")
+        if measure_voltage is None:
+            measure_voltage = False
+        if measure_current is None:
+            measure_current = True
+
+        meas_v_item = QtWidgets.QTableWidgetItem()
+        meas_v_item.setFlags(meas_v_item.flags() | QtCore.Qt.ItemIsUserCheckable)
+        meas_v_item.setCheckState(
+            QtCore.Qt.Checked if measure_voltage else QtCore.Qt.Unchecked
+        )
+        self.channel_table.setItem(row, self.COL_MEAS_V, meas_v_item)
+
+        meas_i_item = QtWidgets.QTableWidgetItem()
+        meas_i_item.setFlags(meas_i_item.flags() | QtCore.Qt.ItemIsUserCheckable)
+        meas_i_item.setCheckState(
+            QtCore.Qt.Checked if measure_current else QtCore.Qt.Unchecked
+        )
+        self.channel_table.setItem(row, self.COL_MEAS_I, meas_i_item)
 
         link_next = QtWidgets.QTableWidgetItem()
         link_next.setFlags(link_next.flags() | QtCore.Qt.ItemIsUserCheckable)
@@ -616,6 +653,16 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         combo.currentTextChanged.connect(self._on_waveform_changed_for_widget)
         self.channel_table.setCellWidget(row, self.COL_WAVEFORM, combo)
 
+        meas_v_item = QtWidgets.QTableWidgetItem()
+        meas_v_item.setFlags(meas_v_item.flags() | QtCore.Qt.ItemIsUserCheckable)
+        meas_v_item.setCheckState(QtCore.Qt.Unchecked)
+        self.channel_table.setItem(row, self.COL_MEAS_V, meas_v_item)
+
+        meas_i_item = QtWidgets.QTableWidgetItem()
+        meas_i_item.setFlags(meas_i_item.flags() | QtCore.Qt.ItemIsUserCheckable)
+        meas_i_item.setCheckState(QtCore.Qt.Checked)
+        self.channel_table.setItem(row, self.COL_MEAS_I, meas_i_item)
+
         link_next = QtWidgets.QTableWidgetItem()
         link_next.setFlags(link_next.flags() | QtCore.Qt.ItemIsUserCheckable)
         link_next.setCheckState(QtCore.Qt.Unchecked)
@@ -692,12 +739,22 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             link_next = (
                 self.channel_table.item(row, self.COL_LINK).checkState() == QtCore.Qt.Checked
             )
+            measure_voltage = (
+                self.channel_table.item(row, self.COL_MEAS_V).checkState()
+                == QtCore.Qt.Checked
+            )
+            measure_current = (
+                self.channel_table.item(row, self.COL_MEAS_I).checkState()
+                == QtCore.Qt.Checked
+            )
 
             configs.append(
                 ChannelConfig(
                     channel_name=channel_name,
                     name=name,
                     waveform=waveform,
+                    measure_voltage=measure_voltage,
+                    measure_current=measure_current,
                     start_voltage=start_voltage,
                     first_node=first_node,
                     second_node=second_node,
@@ -776,7 +833,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                 text = value[1]
                 check = value[2]
                 item = QtWidgets.QTableWidgetItem(text)
-                if col in (self.COL_LINK,):
+                if col in (self.COL_LINK, self.COL_MEAS_V, self.COL_MEAS_I):
                     item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
                     item.setCheckState(check)
                 self.channel_table.setItem(row, col, item)

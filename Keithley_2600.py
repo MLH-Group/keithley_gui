@@ -13,6 +13,7 @@ import qcodes.validators as vals
 from qcodes.instrument import Instrument, InstrumentChannel, VisaInstrument
 from qcodes.parameters import (
     ArrayParameter,
+    ManualParameter,
     Parameter,
     ParameterWithSetpoints,
     ParamRawDataType,
@@ -378,6 +379,14 @@ class Keithley2600Channel(InstrumentChannel):
             "volt",
             parameter_class=_MeasurementVoltageParameter,
             label=f'Voltage{parent}{channel}',
+            unit="V",
+            snapshot_get=False,
+        )
+
+        self.add_parameter(
+            "meas_v",
+            parameter_class=ManualParameter,
+            label=f"MeasVoltage{parent}{channel}",
             unit="V",
             snapshot_get=False,
         )
