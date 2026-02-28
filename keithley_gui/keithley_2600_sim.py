@@ -232,7 +232,15 @@ class Keithley2600(Instrument):
         stmt = cmd.strip()
 
         if stmt == "*TRG":
-            self.__class__._trigger_all()
+            durations = []
+            for state in self._state.values():
+                if not state.trigger_initiated:
+                    continue
+                integration = state.nplc / self.linefreq_hz if self.linefreq_hz else 0.0
+                durations.append(state.delay + integration)
+            if durations:
+                time.sleep(max(durations))
+            self._apply_trigger()
             return
 
         # No-op display commands used by the real driver.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import json
+import subprocess
 import math
 import os
 import sqlite3
@@ -26,9 +28,14 @@ class ParamInfo:
 
     @property
     def display_label(self) -> str:
+        label = self.label or ""
+        if " | " in label:
+            label = label.split(" | ")[-1].strip()
+        if not label:
+            label = self.name
         if self.unit:
-            return f"{self.label} ({self.unit})"
-        return self.label
+            return f"{label} ({self.unit})"
+        return label
 
 
 @dataclass(frozen=True)
@@ -205,6 +212,8 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         self.table_columns: list[str] = []
         self.data: dict[str, list[Any]] = {}
         self.last_id: int = 0
+        self.df_cache = None
+        self.df_cache_run_id: int | None = None
         self.plot_state: tuple[Any, ...] | None = None
         self.colorbar = None
         self.scatter = None
@@ -248,9 +257,98 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("File")
+        new_action = QtWidgets.QAction("New Window", self)
+        new_action.triggered.connect(self._on_new_window)
+        file_menu.addAction(new_action)
         load_action = QtWidgets.QAction("Load DB", self)
         load_action.triggered.connect(self._on_load_db)
         file_menu.addAction(load_action)
+        file_menu.addSeparator()
+        load_state_action = QtWidgets.QAction("Load State", self)
+        load_state_action.triggered.connect(self._on_load_state)
+        file_menu.addAction(load_state_action)
+        save_state_action = QtWidgets.QAction("Save State", self)
+        save_state_action.triggered.connect(self._on_save_state)
+        file_menu.addAction(save_state_action)
+        file_menu.addSeparator()
+
+    def _on_new_window(self) -> None:
+        try:
+            subprocess.Popen([sys.executable, "-m", "keithley_gui.plotter_gui"])
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Failed To Open", str(exc))
+
+    def _collect_state(self) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "db_path": self.reader.path or "",
+            "run_id": self.current_run.run_id if self.current_run else None,
+            "x_name": self.x_combo.currentText().strip(),
+            "y_name": self.y_combo.currentText().strip(),
+            "dep_checks": list(self._checked_dependents()),
+            "layout": "subplot" if self.subplot_radio.isChecked() else "overlay",
+            "auto_refresh": self.auto_refresh.isChecked(),
+            "refresh_interval": float(self.refresh_interval.value()),
+        }
+
+    def _apply_state(self, state: dict[str, Any]) -> None:
+        layout = state.get("layout")
+        if layout == "subplot":
+            self.subplot_radio.setChecked(True)
+        else:
+            self.overlay_radio.setChecked(True)
+
+        auto_refresh = bool(state.get("auto_refresh", self.auto_refresh.isChecked()))
+        self.auto_refresh.setChecked(auto_refresh)
+        interval = state.get("refresh_interval")
+        if isinstance(interval, (int, float)):
+            self.refresh_interval.setValue(float(interval))
+
+        db_path = state.get("db_path") or ""
+        run_id = state.get("run_id")
+        x_name = str(state.get("x_name", ""))
+        y_name = str(state.get("y_name", "(none)"))
+        dep_checks = set(state.get("dep_checks", []))
+
+        if db_path:
+            self._load_db(str(db_path), preserve_state=False)
+            if run_id is not None:
+                run = next((r for r in self.runs if r.run_id == run_id), None)
+                if run is not None:
+                    self._select_run(run)
+            if self.current_run is not None:
+                self._restore_plot_selection(x_name, y_name, dep_checks)
+
+    def _on_save_state(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save Plotter State", "", "JSON Files (*.json);;All Files (*)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path = f"{path}.json"
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(self._collect_state(), handle, indent=2, sort_keys=True)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Save Failed", str(exc))
+
+    def _on_load_state(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load Plotter State", "", "JSON Files (*.json);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                state = json.load(handle)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Load Failed", str(exc))
+            return
+        if not isinstance(state, dict):
+            QtWidgets.QMessageBox.warning(self, "Invalid State", "State file is not valid.")
+            return
+        self._apply_state(state)
 
     def _build_left_panel(self) -> QtWidgets.QWidget:
         panel = QtWidgets.QWidget()
@@ -260,17 +358,6 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         self.db_label.setWordWrap(True)
         layout.addWidget(self.db_label)
 
-        export_row = QtWidgets.QHBoxLayout()
-        self.csv_path = QtWidgets.QLineEdit("")
-        self.export_btn = QtWidgets.QPushButton("Export CSV")
-        self.export_btn.clicked.connect(self._on_export_csv)
-        export_row.addWidget(self.csv_path, 1)
-        export_row.addWidget(self.export_btn)
-        layout.addLayout(export_row)
-
-        self.load_btn = QtWidgets.QPushButton("Load DB")
-        self.load_btn.clicked.connect(self._on_load_db)
-        layout.addWidget(self.load_btn)
         self.refresh_db_btn = QtWidgets.QPushButton("Refresh DB")
         self.refresh_db_btn.clicked.connect(self._on_refresh_db)
         layout.addWidget(self.refresh_db_btn)
@@ -280,6 +367,14 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         self.run_tree.setHeaderHidden(True)
         self.run_tree.itemDoubleClicked.connect(self._on_run_tree_selected)
         layout.addWidget(self.run_tree, 1)
+
+        export_row = QtWidgets.QHBoxLayout()
+        self.csv_path = QtWidgets.QLineEdit("")
+        self.export_btn = QtWidgets.QPushButton("Export CSV")
+        self.export_btn.clicked.connect(self._on_export_csv)
+        export_row.addWidget(self.csv_path, 1)
+        export_row.addWidget(self.export_btn)
+        layout.addLayout(export_row)
 
         return panel
 
@@ -319,7 +414,7 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         panel = QtWidgets.QGroupBox("Variables")
         layout = QtWidgets.QHBoxLayout(panel)
 
-        axis_group = QtWidgets.QGroupBox("Independent Axes")
+        axis_group = QtWidgets.QGroupBox("Axes")
         axis_layout = QtWidgets.QVBoxLayout(axis_group)
         combo_layout = QtWidgets.QFormLayout()
         self.x_combo = QtWidgets.QComboBox()
@@ -330,7 +425,7 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         combo_layout.addRow("Y Axis", self.y_combo)
         axis_layout.addLayout(combo_layout)
 
-        dep_group = QtWidgets.QGroupBox("Dependent")
+        dep_group = QtWidgets.QGroupBox("Variables")
         dep_layout = QtWidgets.QVBoxLayout(dep_group)
         self.dep_list = QtWidgets.QListWidget()
         self.dep_list.itemChanged.connect(self._on_plot_settings_changed)
@@ -477,11 +572,18 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
             self._restore_plot_selection(x_name, y_name, dep_checks)
             self._refresh_now()
 
-    def _update_csv_path_default(self, db_path: str) -> None:
+    def _update_csv_path_default(self, db_path: str, run: RunInfo | None = None) -> None:
         if not db_path:
             return
-        base, _ = os.path.splitext(db_path)
-        self.csv_path.setText(base + ".csv")
+        if run is None:
+            base, _ = os.path.splitext(db_path)
+            self.csv_path.setText(base + ".csv")
+            return
+        base_name = os.path.splitext(os.path.basename(db_path))[0]
+        run_name = run.name or run.table or f"run{run.run_id}"
+        run_name = run_name.replace("/", "_").replace("\\", "_")
+        filename = f"{base_name}_{run_name}_run{run.run_id}.csv"
+        self.csv_path.setText(os.path.join(os.path.dirname(db_path), filename))
 
     def _load_runs(
         self,
@@ -556,15 +658,27 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         run = next((r for r in self.runs if r.run_id == run_id), None)
         if run is None:
             return
-        self._select_run(run)
+        self._select_run(run, preserve_plot=True)
 
-    def _select_run(self, run: RunInfo) -> None:
+    def _select_run(self, run: RunInfo, preserve_plot: bool = False) -> None:
         self.current_run = run
         self.run_summary.setText(
             f"Run {run.run_id} | Exp {run.exp_id} | {run.name} | {run.table}"
         )
+        if self.reader.path:
+            self._update_csv_path_default(self.reader.path, run)
+        prev_plot = None
+        if preserve_plot:
+            prev_plot = (
+                self.x_combo.currentText().strip(),
+                self.y_combo.currentText().strip(),
+                set(self._checked_dependents()),
+            )
         self._reset_data()
+        self._refresh_dataframe()
         self._populate_variable_lists()
+        if preserve_plot and prev_plot is not None:
+            self._restore_plot_selection(*prev_plot)
         self._refresh_now()
 
     def _populate_variable_lists(self) -> None:
@@ -605,6 +719,8 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         self.data = {}
         self.table_columns = []
         self.last_id = 0
+        self.df_cache = None
+        self.df_cache_run_id = None
         if self.current_run is None:
             return
         self.table_columns = self.reader.read_table_columns(self.current_run.table)
@@ -613,10 +729,36 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
                 continue
             self.data[col] = []
 
+    def _refresh_dataframe(self) -> None:
+        if self.current_run is None or self.reader.path is None:
+            self.df_cache = None
+            self.df_cache_run_id = None
+            return
+        try:
+            from qcodes.dataset import initialise_or_create_database_at, load_by_id
+            import pandas as pd  # type: ignore
+        except Exception:
+            self.df_cache = None
+            self.df_cache_run_id = None
+            return
+        try:
+            initialise_or_create_database_at(self.reader.path)
+            ds = load_by_id(self.current_run.run_id)
+            df = ds.to_pandas_dataframe()
+            if isinstance(df.index, pd.MultiIndex) or df.index.name is not None:
+                df = df.reset_index()
+            self.df_cache = df
+            self.df_cache_run_id = self.current_run.run_id
+        except Exception:
+            self.df_cache = None
+            self.df_cache_run_id = None
+
     def _refresh_now(self) -> None:
         if self.current_run is None or self.reader.conn is None:
             return
         new_rows = self._fetch_new_rows()
+        if new_rows or self.df_cache_run_id != self.current_run.run_id:
+            self._refresh_dataframe()
         if new_rows:
             self._update_plot()
         self.status_label.setText(
@@ -660,10 +802,8 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         y2_name = self.y_combo.currentText().strip()
         is_2d = y2_name and y2_name != "(none)"
         if is_2d and not deps:
-            deps = self._auto_select_dependent(x_name, y2_name)
-            if not deps:
-                self.status_label.setText("Select a dependent variable for 2D map.")
-                return
+            self.status_label.setText("Select a variable for Z in 2D map.")
+            return
         if not deps:
             return
         mode = "subplot" if self.subplot_radio.isChecked() else "overlay"
@@ -845,7 +985,7 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         else:
             ax.set_xlabel(x_label)
             if overlay:
-                ax.set_ylabel("Dependent")
+                ax.set_ylabel("Variables")
                 ax.set_title("Overlay")
             else:
                 ax.set_ylabel(self._label_for(dep_name))
@@ -871,6 +1011,12 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         return nrows, ncols
 
     def _values_for(self, name: str) -> np.ndarray:
+        if self.df_cache is not None and name in self.df_cache.columns:
+            series = self.df_cache[name]
+            return np.array(
+                [v if v is not None else np.nan for v in series.to_numpy()],
+                dtype=float,
+            )
         values = self.data.get(name, [])
         if not values:
             return np.array([], dtype=float)
@@ -950,10 +1096,11 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
             return x, y, z, mask
         x_fill = self._nearest_fill(x)
         y_fill = self._nearest_fill(y)
+        z_fill = self._nearest_fill(z)
         mask = self._mask_valid(
-            x_fill, y_fill, z, log_x=log_x, log_y=log_y, log_z=log_z
+            x_fill, y_fill, z_fill, log_x=log_x, log_y=log_y, log_z=log_z
         )
-        return x_fill, y_fill, z, mask
+        return x_fill, y_fill, z_fill, mask
 
     @staticmethod
     def _axis_limits(values: np.ndarray, log: bool) -> tuple[float, float] | None:
@@ -1106,12 +1253,43 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
                 df = df.reset_index()
             if output_csv is None:
                 db_name = os.path.splitext(os.path.basename(db_path))[0]
-                exp_name = ds.exp_name.replace(" ", "_")
+                run_name = self.current_run.name or self.current_run.table or "run"
+                run_name = run_name.replace("/", "_").replace("\\", "_").replace(" ", "_")
                 output_csv = os.path.join(
-                    os.path.dirname(db_path), f"{db_name}_{exp_name}_run{self.current_run.run_id}.csv"
+                    os.path.dirname(db_path),
+                    f"{db_name}_{run_name}_run{self.current_run.run_id}.csv",
                 )
             df = df.astype("float", errors="ignore")
-            df.to_csv(output_csv, index=False)
+            # Write a second header row containing the user-provided channel names.
+            header_names: list[str] = []
+            param_info = self.current_run.param_info
+            unit_type_map = {
+                "A": "Current",
+                "V": "Voltage",
+                "Ohm": "Resistance",
+                "s": "Time",
+                "Hz": "Frequency",
+            }
+            for col in df.columns:
+                info = param_info.get(col)
+                if info is None:
+                    header_names.append("")
+                    continue
+                label = info.label or info.name
+                if " | " in label:
+                    label = label.split(" | ")[-1].strip()
+                type_label = unit_type_map.get(info.unit, "")
+                if label and type_label and info.unit:
+                    header_names.append(f"{label} - {type_label} ({info.unit})")
+                elif label and info.unit:
+                    header_names.append(f"{label} ({info.unit})")
+                else:
+                    header_names.append(label)
+            with open(output_csv, "w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(list(df.columns))
+                writer.writerow(header_names)
+                df.to_csv(handle, index=False, header=False)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Export Failed", str(exc))
             return

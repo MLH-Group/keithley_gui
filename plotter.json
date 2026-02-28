@@ -1,0 +1,11 @@
+{
+  "auto_refresh": true,
+  "db_path": "C:\\Users\\eliho\\OneDrive\\Documents\\GitHub\\_data\\sim\\test.db",
+  "dep_checks": [],
+  "layout": "overlay",
+  "refresh_interval": 1.0,
+  "run_id": 6,
+  "version": 1,
+  "x_name": "time",
+  "y_name": "(none)"
+}

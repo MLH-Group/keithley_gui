@@ -147,20 +147,25 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.state_path = QtWidgets.QLineEdit("gui_state.json")
         self.load_state_btn = QtWidgets.QPushButton("Load State")
         self.save_state_btn = QtWidgets.QPushButton("Save State")
+        self.state_browse_btn = QtWidgets.QPushButton("Browse")
         self.load_state_btn.clicked.connect(self._on_load_state)
         self.save_state_btn.clicked.connect(self._on_save_state)
+        self.state_browse_btn.clicked.connect(self._on_browse_state_file)
 
         self.yaml_path = QtWidgets.QLineEdit("electrochemistry.station.sim.yaml")
-        self.db_path = QtWidgets.QLineEdit("../_data/db/sim/test.db")
-        self.csv_path = QtWidgets.QLineEdit("../_data/csv/sim/test.csv")
-        self.exp_name = QtWidgets.QLineEdit("test")
-        self.device_name = QtWidgets.QLineEdit("test")
+        self.yaml_browse_btn = QtWidgets.QPushButton("Browse")
+        self.yaml_browse_btn.clicked.connect(self._on_browse_yaml)
+        self.save_dir = QtWidgets.QLineEdit("../_data/sim")
+        self.db_name = QtWidgets.QLineEdit("test.db")
+        self.run_name = QtWidgets.QLineEdit("test")
+        self.db_file_btn = QtWidgets.QPushButton("Browse")
+        self.db_file_btn.clicked.connect(self._on_browse_db_file)
 
         self.connect_btn = QtWidgets.QPushButton("Connect")
         self.connect_btn.clicked.connect(self._on_connect)
         self.connect_status = QtWidgets.QLabel("Disconnected")
 
-        self.make_db_btn = QtWidgets.QPushButton("Make DB")
+        self.make_db_btn = QtWidgets.QPushButton("Make DB File")
         self.make_db_btn.clicked.connect(self._on_make_db)
         self.db_status = QtWidgets.QLabel("")
         self.open_plotter_btn = QtWidgets.QPushButton("Open Plotter")
@@ -172,42 +177,42 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.run_status = QtWidgets.QLabel("Idle")
 
         state_btns = QtWidgets.QHBoxLayout()
+        state_btns.addWidget(self.state_browse_btn)
         state_btns.addWidget(self.load_state_btn)
         state_btns.addWidget(self.save_state_btn)
 
         layout.addWidget(QtWidgets.QLabel("GUI state"), 0, 0)
-        layout.addWidget(self.state_path, 0, 1, 1, 2)
-        layout.addLayout(state_btns, 0, 3, 1, 2)
+        layout.addWidget(self.state_path, 0, 1, 1, 3)
+        layout.addLayout(state_btns, 0, 4, 1, 3)
 
         layout.addWidget(QtWidgets.QLabel("YAML"), 1, 0)
-        layout.addWidget(self.yaml_path, 1, 1, 1, 2)
-        connect_row = QtWidgets.QHBoxLayout()
-        connect_row.addWidget(self.connect_btn)
-        connect_row.addWidget(self.connect_status)
-        connect_row.addStretch(1)
-        layout.addLayout(connect_row, 1, 3, 1, 2)
+        layout.addWidget(self.yaml_path, 1, 1, 1, 3)
+        layout.addWidget(self.yaml_browse_btn, 1, 4)
+        layout.addWidget(self.connect_btn, 1, 5)
+        layout.addWidget(self.connect_status, 1, 6)
 
-        layout.addWidget(QtWidgets.QLabel("DB / CSV"), 2, 0)
-        layout.addWidget(self.db_path, 2, 1)
-        layout.addWidget(self.csv_path, 2, 2)
-        layout.addWidget(self.make_db_btn, 2, 3)
-        layout.addWidget(self.db_status, 2, 4)
+        layout.addWidget(QtWidgets.QLabel("Save / DB / Run"), 2, 0)
+        layout.addWidget(self.save_dir, 2, 1)
+        layout.addWidget(self.db_name, 2, 2)
+        layout.addWidget(self.run_name, 2, 3)
+        layout.addWidget(self.db_file_btn, 2, 4)
+        layout.addWidget(self.make_db_btn, 2, 5)
+        layout.addWidget(self.db_status, 2, 6)
 
-        layout.addWidget(QtWidgets.QLabel("Experiment / Device"), 3, 0)
-        layout.addWidget(self.exp_name, 3, 1)
-        layout.addWidget(self.device_name, 3, 2)
-
-        layout.addWidget(self.open_plotter_btn, 4, 0, 1, 5)
+        layout.addWidget(self.open_plotter_btn, 3, 0, 1, 7)
 
         status_row = QtWidgets.QHBoxLayout()
         status_row.addWidget(self.run_indicator)
         status_row.addWidget(self.run_status)
         status_row.addStretch(1)
-        layout.addLayout(status_row, 5, 0, 1, 5)
+        layout.addLayout(status_row, 4, 0, 1, 7)
 
-        layout.setColumnStretch(1, 2)
+        layout.setColumnStretch(1, 3)
         layout.setColumnStretch(2, 2)
-        layout.setColumnStretch(4, 1)
+        layout.setColumnStretch(3, 2)
+        layout.setColumnStretch(4, 0)
+        layout.setColumnStretch(5, 0)
+        layout.setColumnStretch(6, 1)
 
         return box
 
@@ -381,6 +386,59 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             return ""
         return os.path.expandvars(os.path.expanduser(raw))
 
+    def _resolve_save_dir(self) -> str:
+        raw = self.save_dir.text().strip()
+        if not raw:
+            return ""
+        return os.path.abspath(os.path.expanduser(os.path.expandvars(raw)))
+
+    def _resolve_db_path(self) -> str:
+        raw = self.db_name.text().strip()
+        if not raw:
+            return ""
+        if raw.lower().endswith(".db") is False:
+            raw = f"{raw}.db"
+        if os.path.sep in raw or "/" in raw or "\\" in raw:
+            return os.path.abspath(os.path.expanduser(os.path.expandvars(raw)))
+        save_dir = self._resolve_save_dir()
+        if not save_dir:
+            return ""
+        return os.path.join(save_dir, raw)
+
+    @staticmethod
+    def _db_base_name(db_path: str) -> str:
+        return os.path.splitext(os.path.basename(db_path))[0]
+
+    def _on_browse_state_file(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Select GUI State File", self._state_path(), "JSON Files (*.json);;All Files (*)"
+        )
+        if path:
+            if not path.lower().endswith(".json"):
+                path = f"{path}.json"
+            self.state_path.setText(path)
+
+    def _on_browse_yaml(self) -> None:
+        current = os.path.abspath(os.path.expanduser(os.path.expandvars(self.yaml_path.text().strip() or "")))
+        if not current or not os.path.exists(current):
+            current = os.getcwd()
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select Station YAML", current, "YAML Files (*.yaml *.yml);;All Files (*)"
+        )
+        if path:
+            self.yaml_path.setText(path)
+
+    def _on_browse_db_file(self) -> None:
+        current_dir = self._resolve_save_dir() or os.getcwd()
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Select Database File", current_dir, "SQLite DB (*.db);;All Files (*)"
+        )
+        if path:
+            if not path.lower().endswith(".db"):
+                path = f"{path}.db"
+            self.save_dir.setText(os.path.dirname(path))
+            self.db_name.setText(os.path.basename(path))
+
     def _on_save_state(self) -> None:
         self._on_apply_details()
         path = self._state_path()
@@ -450,10 +508,9 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             "version": 1,
             "paths": {
                 "yaml_path": self.yaml_path.text(),
-                "db_path": self.db_path.text(),
-                "csv_path": self.csv_path.text(),
-                "exp_name": self.exp_name.text(),
-                "device_name": self.device_name.text(),
+                "save_dir": self.save_dir.text(),
+                "db_name": self.db_name.text(),
+                "run_name": self.run_name.text(),
             },
             "options": {
                 "ramp_up": self.ramp_up.isChecked(),
@@ -473,10 +530,31 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         paths = state.get("paths", {})
         if isinstance(paths, dict):
             self.yaml_path.setText(paths.get("yaml_path", self.yaml_path.text()))
-            self.db_path.setText(paths.get("db_path", self.db_path.text()))
-            self.csv_path.setText(paths.get("csv_path", self.csv_path.text()))
-            self.exp_name.setText(paths.get("exp_name", self.exp_name.text()))
-            self.device_name.setText(paths.get("device_name", self.device_name.text()))
+            save_dir = paths.get("save_dir")
+            db_name = paths.get("db_name")
+            run_name = paths.get("run_name")
+            if save_dir:
+                self.save_dir.setText(str(save_dir))
+            if db_name:
+                self.db_name.setText(str(db_name))
+            if run_name:
+                self.run_name.setText(str(run_name))
+            # Backward compatibility with older state files.
+            legacy_db = paths.get("db_path")
+            legacy_csv = paths.get("csv_path")
+            legacy_exp = paths.get("exp_name")
+            legacy_device = paths.get("device_name")
+            if legacy_db and not save_dir and not db_name:
+                self.save_dir.setText(str(os.path.dirname(str(legacy_db))))
+                self.db_name.setText(str(os.path.basename(str(legacy_db))))
+            if legacy_csv and not save_dir:
+                self.save_dir.setText(str(os.path.dirname(str(legacy_csv))))
+            if legacy_exp and not run_name:
+                self.run_name.setText(str(legacy_exp))
+            if legacy_device and not db_name:
+                device = str(legacy_device)
+                if device:
+                    self.db_name.setText(device if device.endswith(".db") else f"{device}.db")
 
         options = state.get("options", {})
         if isinstance(options, dict):
@@ -592,28 +670,29 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                 return
 
             self.connect_status.setText("Connected")
+            self.connect_btn.setEnabled(False)
             if self.channel_table.rowCount() == 0:
                 self._populate_channels()
         except Exception as exc:
             self.connect_status.setText(f"Connect failed: {exc}")
 
     def _on_make_db(self) -> None:
-        db_path = self.db_path.text().strip()
+        db_path = self._resolve_db_path()
         if not db_path:
-            self.db_status.setText("DB path required")
+            self.db_status.setText("Database file required")
             return
         try:
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
             initialise_or_create_database_at(db_path)
             self.db_status.setText("DB ready")
         except Exception as exc:
             self.db_status.setText(f"DB error: {exc}")
 
     def _on_open_plotter(self) -> None:
-        db_path_raw = self.db_path.text().strip()
-        if not db_path_raw:
-            QtWidgets.QMessageBox.warning(self, "Missing DB Path", "DB path is required.")
+        db_path = self._resolve_db_path()
+        if not db_path:
+            QtWidgets.QMessageBox.warning(self, "Missing Database", "Database file is required.")
             return
-        db_path = os.path.abspath(os.path.expanduser(os.path.expandvars(db_path_raw)))
         if not os.path.isfile(db_path):
             QtWidgets.QMessageBox.warning(self, "Missing File", f"Could not find:\n{db_path}")
             return
@@ -1166,14 +1245,15 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Invalid Input", str(exc))
             return
 
-        db_path = self.db_path.text().strip()
+        db_path = self._resolve_db_path()
         if not db_path:
-            QtWidgets.QMessageBox.warning(self, "Missing DB Path", "DB path is required.")
+            QtWidgets.QMessageBox.warning(self, "Missing DB Path", "Database file is required.")
             return
 
-        exp_name = self.exp_name.text().strip() or "gui_experiment"
-        device_name = self.device_name.text().strip() or "device"
-        csv_path = self.csv_path.text().strip()
+        run_name = self.run_name.text().strip() or "gui_run"
+        device_name = self._db_base_name(db_path) or "database"
+        save_dir = self._resolve_save_dir() or os.path.dirname(db_path)
+        csv_path = save_dir or ""
 
         self.run_thread = QtCore.QThread()
         self.run_worker = RunWorker(
@@ -1185,8 +1265,9 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             repeat=repeat,
             round_delay=round_delay,
             db_path=db_path,
-            exp_name=exp_name,
+            exp_name=run_name,
             device_name=device_name,
+            run_name=run_name,
             csv_path=csv_path,
             ramp_up=self.ramp_up.isChecked(),
             ramp_down=self.ramp_down.isChecked(),

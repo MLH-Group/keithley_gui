@@ -24,6 +24,7 @@ def build_sweepers(
         sweepers.append(
             {
                 "channel": channel,
+                "channel_name": cfg.channel_name,
                 "name": cfg.name,
                 "measure_voltage": cfg.measure_voltage,
                 "measure_current": cfg.measure_current,
@@ -64,6 +65,7 @@ class RunWorker(QtCore.QObject):
         db_path: str,
         exp_name: str,
         device_name: str,
+        run_name: str,
         csv_path: str,
         ramp_up: bool,
         ramp_down: bool,
@@ -80,6 +82,7 @@ class RunWorker(QtCore.QObject):
         self.db_path = db_path
         self.exp_name = exp_name
         self.device_name = device_name
+        self.run_name = run_name
         self.csv_path = csv_path
         self.ramp_up = ramp_up
         self.ramp_down = ramp_down
@@ -136,6 +139,7 @@ class RunWorker(QtCore.QObject):
                 test_exp,
                 sweepers_save_order,
                 time_independent=self.time_independent,
+                measurement_name=self.run_name or "forward",
             )
             meas_forward.write_period = 2
 
