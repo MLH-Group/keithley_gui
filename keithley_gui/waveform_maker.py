@@ -130,7 +130,6 @@ def build_csv_wave(cfg: ChannelConfig) -> np.ndarray:
     data = np.loadtxt(path, delimiter=",", dtype=float)
     if data.ndim > 1:
         data = data[:, 0]
-    data = np.array(data, dtype=float)
     data = data[np.isfinite(data)]
     if data.size == 0:
         raise ValueError(f"CSV waveform file has no numeric values: {path}")
@@ -213,25 +212,13 @@ def build_plan(
 ) -> list[dict[str, Any]]:
     v_ranges = [build_v_range(cfg, square_final_low=square_final_low) for cfg in configs]
     groups = build_groups(configs)
-
-    group_iters: list[list[tuple[float, ...]]] = []
-    for group in groups:
-        group_ranges = [v_ranges[i] for i in group]
-        max_len = max(len(r) for r in group_ranges)
-        padded = [
-            np.pad(r, (0, max_len - len(r)), mode="edge") for r in group_ranges
-        ]
-        group_iters.append(list(zip(*padded)))
+    sequence = iterate_groups(groups, v_ranges)
 
     plan: list[dict[str, Any]] = []
     for dt_in in dt_list:
         for _rep in range(repeat):
-            for combo in itertools.product(*group_iters):
-                flat = [0.0] * len(v_ranges)
-                for group, values in zip(groups, combo):
-                    for idx, val in zip(group, values):
-                        flat[idx] = val
-                plan.append({"type": "measure", "dt": dt_in, "volt": tuple(flat)})
+            for volt in sequence:
+                plan.append({"type": "measure", "dt": dt_in, "volt": volt})
             if round_delay > 0:
                 plan.append({"type": "sleep", "seconds": round_delay})
     return plan

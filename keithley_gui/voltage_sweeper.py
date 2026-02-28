@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 from typing import Any
 
@@ -15,7 +16,7 @@ def build_sweepers(
     configs: list[ChannelConfig],
     keithleys: dict[str, Any],
     square_final_low: bool = True,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> list[dict[str, Any]]:
     sweepers: list[dict[str, Any]] = []
     for cfg in configs:
         inst_name, ch_name = cfg.channel_name.split(".")
@@ -37,15 +38,13 @@ def build_sweepers(
             }
         )
 
-    return sweepers, list(sweepers)
+    return sweepers
 
 
 def resolve_csv_path(base: str, device: str, exp: str, run_id: int) -> str:
     if base.endswith(".csv"):
         return base
-    if base.endswith("\\") or base.endswith("/"):
-        return f"{base}{device}{exp}_{run_id}_manual_sweep.csv"
-    return f"{base}\\{device}{exp}_{run_id}_manual_sweep.csv"
+    return os.path.join(base, f"{device}{exp}_{run_id}_manual_sweep.csv")
 
 
 class RunWorker(QtCore.QObject):
@@ -133,11 +132,11 @@ class RunWorker(QtCore.QObject):
                 sample_name=self.device_name,
             )
 
-            sweepers, sweepers_save_order = build_sweepers(self.configs, self.keithleys)
+            sweepers = build_sweepers(self.configs, self.keithleys)
             meas_forward, time_param, _indep = utilities.setup_database_registers_arb(
                 self.station,
                 test_exp,
-                sweepers_save_order,
+                sweepers,
                 time_independent=self.time_independent,
                 measurement_name=self.run_name or "forward",
             )
@@ -167,9 +166,7 @@ class RunWorker(QtCore.QObject):
                     self._pause_event.wait()
 
                     if self._rebuild_on_resume:
-                        sweepers, sweepers_save_order = build_sweepers(
-                            self.configs, self.keithleys
-                        )
+                        sweepers = build_sweepers(self.configs, self.keithleys)
                         plan = build_plan(
                             self.configs, self.dt_list, self.repeat, self.round_delay
                         )
@@ -191,7 +188,7 @@ class RunWorker(QtCore.QObject):
 
                     dt_in = entry["dt"]
                     if last_dt is None or dt_in != last_dt:
-                        self._set_ktime(sweepers_save_order, dt_in, self.delay_ratio)
+                        self._set_ktime(sweepers, dt_in, self.delay_ratio)
                         last_dt = dt_in
 
                     for x, sweeper in zip(entry["volt"], sweepers):
@@ -209,10 +206,10 @@ class RunWorker(QtCore.QObject):
                         step_source_values[sweeper["channel"]] = float(x)
 
                     meas_v_sweepers = [
-                        s for s in sweepers_save_order if s.get("measure_voltage")
+                        s for s in sweepers if s.get("measure_voltage")
                     ]
                     meas_i_sweepers = [
-                        s for s in sweepers_save_order if s.get("measure_current")
+                        s for s in sweepers if s.get("measure_current")
                     ]
 
                     if meas_v_sweepers:
@@ -245,7 +242,7 @@ class RunWorker(QtCore.QObject):
                             measured_curr[sweeper["channel"]] = float(reading)
                             source_vals.setdefault(sweeper["channel"], source_v)
 
-                    for sweeper in sweepers_save_order:
+                    for sweeper in sweepers:
                         ch = sweeper["channel"]
                         measure_current = bool(sweeper.get("measure_current", True))
                         measure_voltage = bool(sweeper.get("measure_voltage", False))

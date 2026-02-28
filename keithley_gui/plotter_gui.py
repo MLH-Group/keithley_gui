@@ -18,6 +18,8 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationTool
 from matplotlib.figure import Figure
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from . import utilities
+
 
 @dataclass(frozen=True)
 class ParamInfo:
@@ -218,18 +220,7 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         self.colorbar = None
         self.scatter = None
         self.line_handles: dict[str, Any] = {}
-        self.color_cycle = [
-            "#264653",
-            "#2A9D8F",
-            "#E9C46A",
-            "#F4A261",
-            "#E76F51",
-            "#6D597A",
-            "#355070",
-            "#B56576",
-            "#FFB4A2",
-            "#9A8C98",
-        ]
+        self.color_cycle = utilities.COLOR_CYCLE
         self.cmap = "viridis"
 
         root = QtWidgets.QWidget()
@@ -283,8 +274,8 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
             "version": 1,
             "db_path": self.reader.path or "",
             "run_id": self.current_run.run_id if self.current_run else None,
-            "x_name": self.x_combo.currentText().strip(),
-            "y_name": self.y_combo.currentText().strip(),
+            "x_name": self.x_combo.currentData() or "",
+            "y_name": self.y_combo.currentData() or "",
             "dep_checks": list(self._checked_dependents()),
             "layout": "subplot" if self.subplot_radio.isChecked() else "overlay",
             "auto_refresh": self.auto_refresh.isChecked(),
@@ -307,7 +298,7 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         db_path = state.get("db_path") or ""
         run_id = state.get("run_id")
         x_name = str(state.get("x_name", ""))
-        y_name = str(state.get("y_name", "(none)"))
+        y_name = str(state.get("y_name", ""))
         dep_checks = set(state.get("dep_checks", []))
 
         if db_path:
@@ -557,8 +548,8 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Missing File", f"Could not find:\n{path}")
             return
         selected_run_id = self.current_run.run_id if preserve_state and self.current_run else None
-        x_name = self.x_combo.currentText().strip() if preserve_state else ""
-        y_name = self.y_combo.currentText().strip() if preserve_state else "(none)"
+        x_name = self.x_combo.currentData() or "" if preserve_state else ""
+        y_name = self.y_combo.currentData() or "" if preserve_state else ""
         dep_checks = set(self._checked_dependents()) if preserve_state else set()
         try:
             self.reader.open(path)
@@ -670,8 +661,8 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
         prev_plot = None
         if preserve_plot:
             prev_plot = (
-                self.x_combo.currentText().strip(),
-                self.y_combo.currentText().strip(),
+                self.x_combo.currentData() or "",
+                self.y_combo.currentData() or "",
                 set(self._checked_dependents()),
             )
         self._reset_data()
@@ -705,11 +696,13 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
             item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
             item.setCheckState(QtCore.Qt.Unchecked)
             self.dep_list.addItem(item)
-        params = list(param_names)
-        if params:
-            self.x_combo.addItems(params)
-            self.y_combo.addItem("(none)")
-            self.y_combo.addItems(params)
+        if param_names:
+            self.y_combo.addItem("(none)", "")
+            for name in param_names:
+                info = self.current_run.param_info.get(name)
+                label = info.display_label if info else name
+                self.x_combo.addItem(label, name)
+                self.y_combo.addItem(label, name)
         self.dep_list.blockSignals(False)
         self.x_combo.blockSignals(False)
         self.y_combo.blockSignals(False)
@@ -798,9 +791,9 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
             return
         deps = self._checked_dependents()
 
-        x_name = self.x_combo.currentText().strip()
-        y2_name = self.y_combo.currentText().strip()
-        is_2d = y2_name and y2_name != "(none)"
+        x_name = self.x_combo.currentData() or ""
+        y2_name = self.y_combo.currentData() or ""
+        is_2d = bool(y2_name)
         if is_2d and not deps:
             self.status_label.setText("Select a variable for Z in 2D map.")
             return
@@ -1189,10 +1182,10 @@ class LivePlotterGUI(QtWidgets.QMainWindow):
             return
         self.x_combo.blockSignals(True)
         self.y_combo.blockSignals(True)
-        x_idx = self.x_combo.findText(x_name)
+        x_idx = self.x_combo.findData(x_name)
         if x_idx >= 0:
             self.x_combo.setCurrentIndex(x_idx)
-        y_idx = self.y_combo.findText(y_name)
+        y_idx = self.y_combo.findData(y_name)
         if y_idx >= 0:
             self.y_combo.setCurrentIndex(y_idx)
         self.x_combo.blockSignals(False)

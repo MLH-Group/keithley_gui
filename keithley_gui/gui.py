@@ -30,18 +30,7 @@ class WaveformPlot(FigureCanvasQTAgg):
         super().__init__(self.fig)
         self.setParent(parent)
         self.ax = self.fig.add_subplot(1, 1, 1)
-        self.color_cycle = [
-            "#264653",
-            "#2A9D8F",
-            "#E9C46A",
-            "#F4A261",
-            "#E76F51",
-            "#6D597A",
-            "#355070",
-            "#B56576",
-            "#FFB4A2",
-            "#9A8C98",
-        ]
+        self.color_cycle = utilities.COLOR_CYCLE
 
     def plot(self, traces: dict[str, tuple[np.ndarray, np.ndarray]], mode: str) -> None:
         self.fig.clear()
@@ -1218,7 +1207,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             return
         try:
             configs = self._collect_channel_configs()
-            sweepers, _ = build_sweepers(
+            sweepers = build_sweepers(
                 configs, self.keithleys, square_final_low=False
             )
             ramp_dv = float(self.ramp_dv.text().strip() or "5e-5")

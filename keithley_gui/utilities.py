@@ -1,16 +1,32 @@
 from __future__ import annotations
 
+import logging
 from time import sleep
 
 import numpy as np
 from qcodes.dataset import Measurement
 from qcodes.parameters import ElapsedTimeParameter
 
+log = logging.getLogger(__name__)
+
+COLOR_CYCLE = [
+    "#264653",
+    "#2A9D8F",
+    "#E9C46A",
+    "#F4A261",
+    "#E76F51",
+    "#6D597A",
+    "#355070",
+    "#B56576",
+    "#FFB4A2",
+    "#9A8C98",
+]
+
 
 def ramp_voltage(channel, final, rampdV=5e-5, rampdT=1e-3):
     initial = channel.volt()
     ramp = np.linspace(initial, final, int(1 + abs((initial - final) / rampdV)))
-    print(f"ramping {channel} from {initial} to {final}")
+    log.info("ramping %s from %s to %s", channel, initial, final)
     for x in ramp:
         channel.volt(x)
         sleep(rampdT)
@@ -65,4 +81,3 @@ def setup_database_registers_arb(
         meas_forward.register_parameter(time, setpoints=(*independent_params,))
 
     return meas_forward, time, independent_params
-
