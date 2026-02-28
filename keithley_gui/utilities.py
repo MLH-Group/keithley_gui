@@ -35,14 +35,8 @@ def setup_database_registers_arb(station, test_exp, sweepers, time_independent=F
         channel = sweeper["channel"]
         measure_current = bool(sweeper.get("measure_current", True))
         measure_voltage = bool(sweeper.get("measure_voltage", False))
-        if measure_current and (
-            "nano" not in sweeper["name"] or "temperature" in sweeper["name"]
-        ):
+        if measure_current:
             meas_forward.register_parameter(channel.curr, setpoints=(*independent_params,))
-        if measure_current and "temperature" in sweeper["name"]:
-            meas_forward.register_parameter(
-                channel.temperature, setpoints=(*independent_params,)
-            )
         if measure_voltage:
             meas_forward.register_parameter(
                 channel.meas_v, setpoints=(*independent_params,)
@@ -55,20 +49,3 @@ def setup_database_registers_arb(station, test_exp, sweepers, time_independent=F
 
     return meas_forward, time, independent_params
 
-
-def rToT(r):
-    r = abs(r)
-    A1 = 0.003354
-    B1 = 3e-4
-    C1 = 5.09e-6
-    D1 = 2.19e-7
-    R25 = 1e4
-    if r > 0:
-        denom = A1 + B1 * np.log(r / R25) + C1 * np.log(r / R25) ** 2 + D1 * np.log(
-            r / R25
-        ) ** 3
-    else:
-        print("Invalid r value, returning 0")
-        return 0
-    t = -273.15 + 1 / denom
-    return t

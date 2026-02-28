@@ -27,5 +27,5 @@ if errorlevel 1 (
   set "PYTHON_EXE=pythonw"
 )
 
-start "" /D "%REPO_DIR%" %PYTHON_EXE% "%REPO_DIR%\k_plotter.py"
+start "" /D "%REPO_DIR%" %PYTHON_EXE% -m keithley_gui.plotter_gui
 exit /b 0

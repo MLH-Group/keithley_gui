@@ -33,16 +33,6 @@ if errorlevel 1 (
 )
 if errorlevel 1 goto :error
 
-echo.
-echo Verifying setuptools (pkg_resources)...
-call "%CONDA_BAT%" run -n keithley_labtools python -c "import pkg_resources; print('pkg_resources ok')"
-if errorlevel 1 (
-  echo.
-  echo pkg_resources missing. Installing setuptools...
-  call "%CONDA_BAT%" install -n keithley_labtools setuptools -y
-)
-if errorlevel 1 goto :error
-
 set "REPO_DIR=%REPO_DIR%"
 call "%CONDA_BAT%" run -n keithley_labtools python -c "import os, site, pathlib; p=pathlib.Path(site.getsitepackages()[0])/'keithley_gui.pth'; p.write_text(os.environ['REPO_DIR'])"
 if errorlevel 1 goto :error

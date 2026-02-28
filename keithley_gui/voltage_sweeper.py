@@ -6,9 +6,9 @@ from typing import Any
 from PyQt5 import QtCore
 from qcodes.dataset import initialise_or_create_database_at, load_or_create_experiment
 
-import trigger_fns
-import utilities
-from waveform_maker import ChannelConfig, build_plan, build_v_range, find_resume_index
+from . import trigger_fns
+from . import utilities
+from .waveform_maker import ChannelConfig, build_plan, build_v_range, find_resume_index
 
 
 def build_sweepers(
@@ -248,10 +248,7 @@ class RunWorker(QtCore.QObject):
                         source_v = source_vals.get(ch, step_source_values.get(ch, 0.0))
                         v_used = measured_volt.get(ch, source_v)
                         j = measured_curr.get(ch)
-                        if measure_current and (
-                            "nano" not in sweeper["name"]
-                            or "temperature" in sweeper["name"]
-                        ):
+                        if measure_current:
                             if j is None:
                                 j = 0.0
                             get_readings.append((ch.curr, j))
@@ -263,10 +260,6 @@ class RunWorker(QtCore.QObject):
 
                         if measure_voltage:
                             get_readings.append((ch.meas_v, v_used))
-
-                        if "temperature" in sweeper["name"] and measure_current:
-                            temperature = utilities.rToT(v_used / j) if j else 0.0
-                            get_readings.append((ch.temperature, temperature))
 
                     forward_saver.add_result(
                         *independent_params,
@@ -287,8 +280,7 @@ class RunWorker(QtCore.QObject):
 
             if self.ramp_down:
                 for sweeper in sweepers:
-                    if "nano" not in sweeper["name"]:
-                        utilities.ramp_voltage(sweeper["channel"], 0)
+                    utilities.ramp_voltage(sweeper["channel"], 0)
 
             self.finished.emit()
         except Exception as exc:

@@ -28,7 +28,7 @@ echo (If it fails, errors will be shown here.)
 echo.
 
 pushd "%REPO_DIR%"
-%PYTHON_EXE% "%REPO_DIR%\k_gui.py"
+%PYTHON_EXE% -m keithley_gui.gui
 set "RC=%ERRORLEVEL%"
 popd
 

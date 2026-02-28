@@ -40,13 +40,6 @@ class Keithley2600Channel(InstrumentChannel):
         self.channel = channel
 
         self.add_parameter(
-            "temperature",
-            label=f"Temp{parent}{channel}",
-            unit="C",
-            snapshot_get=False,
-        )
-
-        self.add_parameter(
             "volt",
             label=f"Voltage{parent}{channel}",
             unit="V",

@@ -19,9 +19,9 @@ except Exception:  # pragma: no cover - optional dependency
 from qcodes.dataset import initialise_or_create_database_at
 from qcodes.station import Station
 
-import utilities
-from voltage_sweeper import RunWorker, build_sweepers
-from waveform_maker import ChannelConfig, build_traces
+from . import utilities
+from .voltage_sweeper import RunWorker, build_sweepers
+from .waveform_maker import ChannelConfig, build_traces
 
 
 class WaveformPlot(FigureCanvasQTAgg):
@@ -1148,10 +1148,9 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             ramp_dv = float(self.ramp_dv.text().strip() or "5e-5")
             ramp_dt = float(self.ramp_dt.text().strip() or "1e-3")
             for sweeper in sweepers:
-                if "nano" not in sweeper["name"]:
-                    utilities.ramp_voltage(
-                        sweeper["channel"], 0, rampdV=ramp_dv, rampdT=ramp_dt
-                    )
+                utilities.ramp_voltage(
+                    sweeper["channel"], 0, rampdV=ramp_dv, rampdT=ramp_dt
+                )
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Ramp Failed", str(exc))
 

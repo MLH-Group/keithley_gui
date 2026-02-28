@@ -367,14 +367,6 @@ class Keithley2600Channel(InstrumentChannel):
         vlimit_minmax = self.parent._vlimit_minmax
         ilimit_minmax = self.parent._ilimit_minmax
 
-        #artificial parameter to record temperature (calculated in utilities.py)
-        self.add_parameter(
-            "temperature",
-            label = f'Temp{parent}{channel}',
-            unit = "C",
-            snapshot_get = False,
-        )
-
         self.add_parameter(
             "volt",
             parameter_class=_MeasurementVoltageParameter,
