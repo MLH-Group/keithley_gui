@@ -617,14 +617,11 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         if not os.path.isfile(db_path):
             QtWidgets.QMessageBox.warning(self, "Missing File", f"Could not find:\n{db_path}")
             return
-        script_path = os.path.join(os.path.dirname(__file__), "k_plotter.py")
-        if not os.path.isfile(script_path):
-            QtWidgets.QMessageBox.warning(self, "Missing Plotter", f"Could not find:\n{script_path}")
-            return
         try:
+            repo_root = os.path.dirname(os.path.dirname(__file__))
             subprocess.Popen(
-                [sys.executable, script_path, "--db", db_path],
-                cwd=os.path.dirname(script_path),
+                [sys.executable, "-m", "keithley_gui.plotter_gui", "--db", db_path],
+                cwd=repo_root,
             )
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Failed To Open Plotter", str(exc))

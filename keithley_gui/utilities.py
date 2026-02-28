@@ -4,7 +4,7 @@ from time import sleep
 
 import numpy as np
 from qcodes.dataset import Measurement
-from qcodes.instrument.specialized_parameters import ElapsedTimeParameter
+from qcodes.parameters import ElapsedTimeParameter
 
 
 def ramp_voltage(channel, final, rampdV=5e-5, rampdT=1e-3):

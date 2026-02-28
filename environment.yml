@@ -9,7 +9,7 @@ dependencies:
   - pandas
   - matplotlib
   - pyqt=5
-  - qcodes
+  - qcodes=0.54.4
   - pyvisa
   - pyvisa-py
   - pyserial
