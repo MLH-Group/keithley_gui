@@ -399,8 +399,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         return os.path.splitext(os.path.basename(db_path))[0]
 
     def _on_browse_state_file(self) -> None:
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Select GUI State File", self._state_path(), "JSON Files (*.json);;All Files (*)"
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Open GUI State File", self._state_path(), "JSON Files (*.json);;All Files (*)"
         )
         if path:
             if not path.lower().endswith(".json"):
@@ -419,8 +419,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
     def _on_browse_db_file(self) -> None:
         current_dir = self._resolve_save_dir() or os.getcwd()
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Select Database File", current_dir, "SQLite DB (*.db);;All Files (*)"
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Open Database File", current_dir, "SQLite DB (*.db);;All Files (*)"
         )
         if path:
             if not path.lower().endswith(".db"):
