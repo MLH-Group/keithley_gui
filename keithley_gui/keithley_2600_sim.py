@@ -202,6 +202,19 @@ class Keithley2600(Instrument):
             ch, idx = m_source.group(1), int(m_source.group(2)) - 1
             return f"{self._buffer_get(self._state[ch].sourcevalues, idx)}"
 
+        m_source_and_reading = re.fullmatch(
+            r"(smu[ab])\.nvbuffer1\.sourcevalues\[(\d+)\],\s*(smu[ab])\.nvbuffer1\.readings\[(\d+)\]",
+            expr,
+        )
+        if m_source_and_reading:
+            ch1, idx1 = m_source_and_reading.group(1), int(m_source_and_reading.group(2)) - 1
+            ch2, idx2 = m_source_and_reading.group(3), int(m_source_and_reading.group(4)) - 1
+            if ch1 != ch2:
+                raise ValueError("Mixed-channel source/readback query is not supported.")
+            source = self._buffer_get(self._state[ch1].sourcevalues, idx1)
+            reading = self._buffer_get(self._state[ch1].readings, idx2)
+            return f"{source}\t{reading}"
+
         m_get = re.fullmatch(
             r"(smu[ab])\.(measure\.delay|measure\.nplc|measure\.autozero|source\.func|source\.output|source\.rangev|source\.rangei|measure\.rangev|measure\.rangei)",
             expr,
