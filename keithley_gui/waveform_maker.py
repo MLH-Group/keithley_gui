@@ -225,10 +225,25 @@ def build_plan(
 
 
 def find_resume_index(
-    plan: list[dict[str, Any]], last_volt: tuple[float, ...]
+    plan: list[dict[str, Any]],
+    last_volt: tuple[float, ...],
+    last_delta: tuple[float, ...] | None = None,
 ) -> int | None:
-    best_idx = None
-    best_dist = None
+    if not plan or last_volt is None:
+        return None
+
+    if last_delta is not None and len(last_delta) != len(last_volt):
+        last_delta = None
+
+    prev_measure_idx: list[int | None] = [None] * len(plan)
+    last_measure: int | None = None
+    for idx, entry in enumerate(plan):
+        prev_measure_idx[idx] = last_measure
+        if entry.get("type") == "measure":
+            last_measure = idx
+
+    best_dist: float | None = None
+    candidates: list[tuple[int, float]] = []
     for idx, entry in enumerate(plan):
         if entry.get("type") != "measure":
             continue
@@ -238,5 +253,45 @@ def find_resume_index(
         dist = sum((a - b) ** 2 for a, b in zip(volt, last_volt))
         if best_dist is None or dist < best_dist:
             best_dist = dist
+            candidates = [(idx, dist)]
+        elif best_dist is not None:
+            tol = max(1e-12, best_dist * 1e-6)
+            if dist <= best_dist + tol:
+                candidates.append((idx, dist))
+
+    if not candidates:
+        return None
+    if last_delta is None:
+        return candidates[0][0]
+
+    def direction_alignment(
+        candidate_idx: int, last_delta_local: tuple[float, ...]
+    ) -> float | None:
+        prev_idx = prev_measure_idx[candidate_idx]
+        if prev_idx is None:
+            return None
+        prev_entry = plan[prev_idx]
+        curr_entry = plan[candidate_idx]
+        prev_volt = prev_entry.get("volt")
+        curr_volt = curr_entry.get("volt")
+        if prev_volt is None or curr_volt is None:
+            return None
+        delta = tuple(c - p for c, p in zip(curr_volt, prev_volt))
+        last_norm = sum(d * d for d in last_delta_local) ** 0.5
+        delta_norm = sum(d * d for d in delta) ** 0.5
+        if last_norm < 1e-12 or delta_norm < 1e-12:
+            return None
+        dot = sum(a * b for a, b in zip(last_delta_local, delta))
+        return dot / (last_norm * delta_norm)
+
+    best_idx = candidates[0][0]
+    best_align: float | None = None
+    for idx, _dist in candidates:
+        align = direction_alignment(idx, last_delta)
+        if align is None:
+            continue
+        if best_align is None or align > best_align:
+            best_align = align
             best_idx = idx
+
     return best_idx

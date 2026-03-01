@@ -99,6 +99,8 @@ class RunWorker(QtCore.QObject):
         self.is_paused = False
         self._stop_requested = False
         self._last_volt: tuple[float, ...] | None = None
+        self._prev_measure_volt: tuple[float, ...] | None = None
+        self._last_delta: tuple[float, ...] | None = None
         self._visa_overhead_s = 0.0
         self._min_programmed_step_s = 1e-3
         self._reprogram_threshold_s = 2e-4
@@ -185,7 +187,9 @@ class RunWorker(QtCore.QObject):
                             self.configs, self.dt_list, self.repeat, self.round_delay
                         )
                         if self._last_volt is not None:
-                            resume_idx = find_resume_index(plan, self._last_volt)
+                            resume_idx = find_resume_index(
+                                plan, self._last_volt, self._last_delta
+                            )
                             if resume_idx is not None:
                                 self._step_index = resume_idx
                         if self._step_index >= len(plan):
@@ -285,7 +289,19 @@ class RunWorker(QtCore.QObject):
                     next_measure_deadline += dt_in
                     if step_end - next_measure_deadline > dt_in:
                         next_measure_deadline = step_end
-                    self._last_volt = entry["volt"]
+                    if entry.get("type") == "measure":
+                        volt_tuple = tuple(entry.get("volt", ()))
+                        if self._prev_measure_volt is not None and len(
+                            volt_tuple
+                        ) == len(self._prev_measure_volt):
+                            delta = tuple(
+                                c - p for c, p in zip(volt_tuple, self._prev_measure_volt)
+                            )
+                            delta_norm = sum(d * d for d in delta) ** 0.5
+                            if delta_norm >= 1e-12:
+                                self._last_delta = delta
+                        self._prev_measure_volt = volt_tuple
+                        self._last_volt = volt_tuple
                     self._step_index += 1
                     if self._stop_requested:
                         break
