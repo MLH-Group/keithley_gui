@@ -26,6 +26,10 @@ def build_sweepers(
         meas_v_param = None
         if cfg.measure_voltage:
             meas_v_param = utilities.ensure_meas_v_parameter(channel)
+        source_mode = str(getattr(cfg, "source_mode", "v")).strip().lower()
+        if source_mode not in {"v", "i"}:
+            source_mode = "v"
+        source_param = channel.curr if source_mode == "i" else channel.volt
         sweepers.append(
             {
                 "channel": channel,
@@ -40,6 +44,8 @@ def build_sweepers(
                 "dV": cfg.dV,
                 "independent": cfg.independent,
                 "v_range": v_range,
+                "source_mode": source_mode,
+                "source_param": source_param,
             }
         )
 
@@ -143,6 +149,8 @@ class RunWorker(QtCore.QObject):
             )
 
             sweepers = build_sweepers(self.configs, self.keithleys)
+            for sweeper in sweepers:
+                utilities.set_source_mode(sweeper["channel"], sweeper["source_mode"])
             meas_forward, time_param, _indep = utilities.setup_database_registers_arb(
                 self.station,
                 test_exp,
@@ -154,7 +162,11 @@ class RunWorker(QtCore.QObject):
 
             if self.ramp_up:
                 for sweeper in sweepers:
-                    utilities.ramp_voltage(sweeper["channel"], sweeper["v_range"][0])
+                    utilities.ramp_source(
+                        sweeper["channel"],
+                        sweeper["v_range"][0],
+                        source_mode=sweeper["source_mode"],
+                    )
 
             for sweeper in sweepers:
                 ch = sweeper["channel"]
@@ -183,6 +195,10 @@ class RunWorker(QtCore.QObject):
 
                     if self._rebuild_on_resume:
                         sweepers = build_sweepers(self.configs, self.keithleys)
+                        for sweeper in sweepers:
+                            utilities.set_source_mode(
+                                sweeper["channel"], sweeper["source_mode"]
+                            )
                         plan = build_plan(
                             self.configs, self.dt_list, self.repeat, self.round_delay
                         )
@@ -233,7 +249,10 @@ class RunWorker(QtCore.QObject):
                         last_split_for_dual = split_for_dual
 
                     for x, sweeper in zip(entry["volt"], sweepers):
-                        trigger_fns.set_v(sweeper["channel"], x)
+                        if sweeper["source_mode"] == "i":
+                            trigger_fns.set_i(sweeper["channel"], x)
+                        else:
+                            trigger_fns.set_v(sweeper["channel"], x)
 
                     t = time_param()
                     get_readings = []
@@ -253,22 +272,31 @@ class RunWorker(QtCore.QObject):
                         ch = sweeper["channel"]
                         measure_current = bool(sweeper.get("measure_current", True))
                         measure_voltage = bool(sweeper.get("measure_voltage", False))
-                        source_v = source_vals.get(ch, step_source_values.get(ch, 0.0))
+                        source_value = source_vals.get(
+                            ch, step_source_values.get(ch, 0.0)
+                        )
                         measured_v = measured_volt.get(ch)
                         if measure_voltage and measured_v is None:
                             measured_v = self._read_voltage_direct(ch)
                             measured_volt[ch] = measured_v
-                        v_used = measured_v if measured_v is not None else source_v
                         j = measured_curr.get(ch)
-                        if measure_current:
+                        if measure_current and sweeper["source_mode"] != "i":
                             if j is None:
                                 j = 0.0
                             get_readings.append((ch.curr, j))
 
+                        source_used = source_value
+                        if sweeper["source_mode"] == "v" and measured_v is not None:
+                            source_used = measured_v
+                        elif sweeper["source_mode"] == "i" and j is not None:
+                            source_used = j
+
                         if sweeper["independent"]:
-                            independent_params.append((ch.volt, source_v))
+                            independent_params.append(
+                                (sweeper["source_param"], source_used)
+                            )
                         else:
-                            get_readings.append((ch.volt, v_used))
+                            get_readings.append((sweeper["source_param"], source_used))
 
                         if measure_voltage:
                             meas_v_param = sweeper.get("meas_v_param")
@@ -315,7 +343,9 @@ class RunWorker(QtCore.QObject):
 
             if self.ramp_down:
                 for sweeper in sweepers:
-                    utilities.ramp_voltage(sweeper["channel"], 0)
+                    utilities.ramp_source(
+                        sweeper["channel"], 0, source_mode=sweeper["source_mode"]
+                    )
 
             self.finished.emit()
         except Exception as exc:
@@ -340,7 +370,10 @@ class RunWorker(QtCore.QObject):
         dt_in = float(first_measure["dt"])
         self._set_ktime(sweepers, dt_in, self.delay_ratio, split_for_dual=split_for_dual)
         for x, sweeper in zip(first_measure["volt"], sweepers):
-            trigger_fns.set_v(sweeper["channel"], x)
+            if sweeper["source_mode"] == "i":
+                trigger_fns.set_i(sweeper["channel"], x)
+            else:
+                trigger_fns.set_v(sweeper["channel"], x)
         self._measure_step_trigger_readings(sweepers, split_for_dual=split_for_dual)
 
         return dt_in

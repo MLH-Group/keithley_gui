@@ -13,6 +13,7 @@ class ChannelConfig:
     channel_name: str
     name: str
     waveform: str
+    source_mode: str
     measure_voltage: bool
     measure_current: bool
     start_voltage: float

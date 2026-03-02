@@ -82,3 +82,8 @@ def recall_buffer(ch: Any) -> tuple[str, str]:
 def set_v(ch: Any, volt: float) -> None:
     volt_str = str(volt)
     ch.write(f"{ch.channel}.trigger.source.linearv({volt_str}, {volt_str}, 1)")
+
+
+def set_i(ch: Any, curr: float) -> None:
+    curr_str = str(curr)
+    ch.write(f"{ch.channel}.trigger.source.lineari({curr_str}, {curr_str}, 1)")

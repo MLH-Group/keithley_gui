@@ -27,6 +27,7 @@ class _ChannelState:
     trigger_measure_mode: str = "i"
     trigger_initiated: bool = False
     pending_linear_v: float | None = None
+    pending_linear_i: float | None = None
     readings: list[float] = field(default_factory=list)
     sourcevalues: list[float] = field(default_factory=list)
 
@@ -282,6 +283,18 @@ class Keithley2600(Instrument):
             state.source_levelv = start_v
             return
 
+        m_lineari = re.fullmatch(
+            r"(smu[ab])\.trigger\.source\.lineari\(([^,]+),\s*([^,]+),\s*([^)]+)\)",
+            stmt,
+        )
+        if m_lineari:
+            ch = m_lineari.group(1)
+            start_i = float(m_lineari.group(2))
+            state = self._state[ch]
+            state.pending_linear_i = start_i
+            state.source_leveli = start_i
+            return
+
         m_clear = re.fullmatch(r"(smu[ab])\.nvbuffer1\.clear\(\)", stmt)
         if m_clear:
             ch = m_clear.group(1)
@@ -387,16 +400,27 @@ class Keithley2600(Instrument):
             if not state.trigger_initiated:
                 continue
 
-            source_v = (
-                state.pending_linear_v
-                if state.pending_linear_v is not None
-                else state.source_levelv
-            )
-            state.source_levelv = source_v
+            source_mode = "i" if state.mode == 0 else "v"
+            if source_mode == "i":
+                source_value = (
+                    state.pending_linear_i
+                    if state.pending_linear_i is not None
+                    else state.source_leveli
+                )
+                state.source_leveli = source_value
+            else:
+                source_value = (
+                    state.pending_linear_v
+                    if state.pending_linear_v is not None
+                    else state.source_levelv
+                )
+                state.source_levelv = source_value
 
-            reading = self._measure_from_source(ch, source_v, state.trigger_measure_mode)
+            reading = self._measure_from_source(
+                ch, source_value, state.trigger_measure_mode, source_mode
+            )
             state.readings.append(reading)
-            state.sourcevalues.append(source_v)
+            state.sourcevalues.append(source_value)
             state.trigger_initiated = False
 
     @classmethod
@@ -418,18 +442,27 @@ class Keithley2600(Instrument):
 
     def _measure_now(self, ch: str, mode: str) -> float:
         state = self._state[ch]
-        source_v = state.source_levelv
-        return self._measure_from_source(ch, source_v, mode)
+        source_mode = "i" if state.mode == 0 else "v"
+        source_value = state.source_leveli if source_mode == "i" else state.source_levelv
+        return self._measure_from_source(ch, source_value, mode, source_mode)
 
-    def _measure_from_source(self, ch: str, source_v: float, mode: str) -> float:
+    def _measure_from_source(
+        self, ch: str, source_value: float, mode: str, source_mode: str
+    ) -> float:
+        if source_mode == "i":
+            if mode == "i":
+                return source_value + self._rng.normal(0.0, self._noise_i[ch])
+            if mode == "v":
+                gain = self._gain[ch] if abs(self._gain[ch]) > 1e-12 else 1.0
+                return source_value / gain + self._rng.normal(0.0, self._noise_v[ch])
         if mode == "i":
             return (
-                self._gain[ch] * source_v
+                self._gain[ch] * source_value
                 + self._offset[ch]
                 + self._rng.normal(0.0, self._noise_i[ch])
             )
         if mode == "v":
-            return source_v + self._rng.normal(0.0, self._noise_v[ch])
+            return source_value + self._rng.normal(0.0, self._noise_v[ch])
         raise ValueError(f"Unsupported measurement mode: {mode}")
 
     @staticmethod

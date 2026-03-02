@@ -32,7 +32,12 @@ class WaveformPlot(FigureCanvasQTAgg):
         self.ax = self.fig.add_subplot(1, 1, 1)
         self.color_cycle = utilities.COLOR_CYCLE
 
-    def plot(self, traces: dict[str, tuple[np.ndarray, np.ndarray]], mode: str) -> None:
+    def plot(
+        self,
+        traces: dict[str, tuple[np.ndarray, np.ndarray]],
+        mode: str,
+        y_label: str = "Voltage (V)",
+    ) -> None:
         self.fig.clear()
         if not traces:
             self.ax = self.fig.add_subplot(1, 1, 1)
@@ -51,7 +56,7 @@ class WaveformPlot(FigureCanvasQTAgg):
                 ax.set_title(name)
                 ax.set_xlabel("Time (s)")
                 if (idx - 1) % ncols == 0:
-                    ax.set_ylabel("Voltage (V)")
+                    ax.set_ylabel(y_label)
                 else:
                     ax.set_ylabel("")
                 ax.grid(True, which="both", alpha=0.3, linestyle="--", linewidth=0.6)
@@ -61,7 +66,7 @@ class WaveformPlot(FigureCanvasQTAgg):
             for name, (t, v) in traces.items():
                 self.ax.plot(t, v, label=name, linestyle="-", marker="o", markersize=3, linewidth=1)
             self.ax.set_xlabel("Time (s)")
-            self.ax.set_ylabel("Voltage (V)")
+            self.ax.set_ylabel(y_label)
             self.ax.legend(loc="best")
             self.ax.grid(True, which="both", alpha=0.3, linestyle="--", linewidth=0.6)
         self.fig.tight_layout()
@@ -80,9 +85,11 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
     COL_CHANNEL = 0
     COL_NAME = 1
     COL_WAVEFORM = 2
-    COL_MEAS_V = 3
-    COL_MEAS_I = 4
-    COL_LINK = 5
+    COL_SET_V = 3
+    COL_SET_I = 4
+    COL_MEAS_V = 5
+    COL_MEAS_I = 6
+    COL_LINK = 7
 
     def __init__(self) -> None:
         super().__init__()
@@ -92,6 +99,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.keithleys: dict[str, Any] = {}
         self.run_thread: QtCore.QThread | None = None
         self.run_worker: RunWorker | None = None
+        self._suppress_item_changed = False
 
         root = QtWidgets.QWidget()
         self.setCentralWidget(root)
@@ -210,12 +218,14 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(box)
 
         # Left table: compact channel list.
-        self.channel_table = QtWidgets.QTableWidget(0, 6)
+        self.channel_table = QtWidgets.QTableWidget(0, 8)
         self.channel_table.setHorizontalHeaderLabels(
             [
                 "Channel",
                 "Name",
                 "Waveform",
+                "Set V",
+                "Set I",
                 "Meas V",
                 "Meas I",
                 "Link Next",
@@ -226,6 +236,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         header.setSectionResizeMode(self.COL_CHANNEL, QtWidgets.QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_NAME, QtWidgets.QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_WAVEFORM, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(self.COL_SET_V, QtWidgets.QHeaderView.Fixed)
+        header.setSectionResizeMode(self.COL_SET_I, QtWidgets.QHeaderView.Fixed)
         header.setSectionResizeMode(self.COL_MEAS_V, QtWidgets.QHeaderView.Fixed)
         header.setSectionResizeMode(self.COL_MEAS_I, QtWidgets.QHeaderView.Fixed)
         header.setSectionResizeMode(self.COL_LINK, QtWidgets.QHeaderView.Fixed)
@@ -236,6 +248,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.channel_table.selectionModel().currentRowChanged.connect(
             self._on_row_selected
         )
+        self.channel_table.itemChanged.connect(self._on_channel_item_changed)
         self.channel_table.horizontalHeader().sectionResized.connect(
             lambda *_: self._tune_channel_table_columns()
         )
@@ -271,12 +284,18 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         header = self.channel_table.horizontalHeader()
         self.channel_table.resizeColumnsToContents()
         metrics = QtGui.QFontMetrics(self.channel_table.font())
+        set_v_text = self.channel_table.horizontalHeaderItem(self.COL_SET_V).text()
+        set_v_width = metrics.horizontalAdvance(set_v_text) + 22
+        set_i_text = self.channel_table.horizontalHeaderItem(self.COL_SET_I).text()
+        set_i_width = metrics.horizontalAdvance(set_i_text) + 22
         meas_v_text = self.channel_table.horizontalHeaderItem(self.COL_MEAS_V).text()
         meas_v_width = metrics.horizontalAdvance(meas_v_text) + 22
         meas_i_text = self.channel_table.horizontalHeaderItem(self.COL_MEAS_I).text()
         meas_i_width = metrics.horizontalAdvance(meas_i_text) + 22
         link_text = self.channel_table.horizontalHeaderItem(self.COL_LINK).text()
         link_width = metrics.horizontalAdvance(link_text) + 22
+        header.resizeSection(self.COL_SET_V, set_v_width)
+        header.resizeSection(self.COL_SET_I, set_i_width)
         header.resizeSection(self.COL_MEAS_V, meas_v_width)
         header.resizeSection(self.COL_MEAS_I, meas_i_width)
         header.resizeSection(self.COL_LINK, link_width)
@@ -293,13 +312,14 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.round_delay = QtWidgets.QLineEdit("0")
         self.ramp_dv = QtWidgets.QLineEdit("5e-5")
         self.ramp_dt = QtWidgets.QLineEdit("1e-3")
+        self.ramp_step_label = QtWidgets.QLabel("ramp_dV")
 
         layout.addWidget(QtWidgets.QLabel("ramp_up"), 0, 0)
         layout.addWidget(self.ramp_up, 0, 1)
         layout.addWidget(QtWidgets.QLabel("ramp_down"), 0, 2)
         layout.addWidget(self.ramp_down, 0, 3)
 
-        layout.addWidget(QtWidgets.QLabel("ramp_dV"), 1, 0)
+        layout.addWidget(self.ramp_step_label, 1, 0)
         layout.addWidget(self.ramp_dv, 1, 1)
         layout.addWidget(QtWidgets.QLabel("ramp_dT (s)"), 1, 2)
         layout.addWidget(self.ramp_dt, 1, 3)
@@ -475,6 +495,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             channel_name = self._get_table_text(row, self.COL_CHANNEL, f"row{row}")
             name = self._get_table_text(row, self.COL_NAME, channel_name)
             waveform = self._get_waveform_value(row)
+            source_mode = self._source_mode_for_row(row)
             measure_voltage = self._get_check_state(row, self.COL_MEAS_V)
             measure_current = self._get_check_state(row, self.COL_MEAS_I)
             link_next = self._get_check_state(row, self.COL_LINK)
@@ -486,6 +507,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                     "channel_name": channel_name,
                     "name": name,
                     "waveform": waveform,
+                    "source_mode": source_mode,
                     "measure_voltage": measure_voltage,
                     "measure_current": measure_current,
                     "link_next": link_next,
@@ -580,6 +602,9 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         waveform = str(data.get("waveform", "Triangle"))
         if waveform not in {"Triangle", "Square", "Square-3", "Sine", "Fixed"}:
             waveform = "Triangle"
+        source_mode = str(data.get("source_mode", "v")).strip().lower()
+        if source_mode not in {"v", "i"}:
+            source_mode = "v"
 
         self.channel_table.setItem(row, self.COL_CHANNEL, QtWidgets.QTableWidgetItem(channel_name))
         self.channel_table.setItem(row, self.COL_NAME, QtWidgets.QTableWidgetItem(name))
@@ -590,6 +615,21 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         combo.setProperty("row", row)
         combo.currentTextChanged.connect(self._on_waveform_changed_for_widget)
         self.channel_table.setCellWidget(row, self.COL_WAVEFORM, combo)
+
+        set_v_item = QtWidgets.QTableWidgetItem()
+        set_v_item.setFlags(set_v_item.flags() | QtCore.Qt.ItemIsUserCheckable)
+        set_v_item.setCheckState(
+            QtCore.Qt.Checked if source_mode == "v" else QtCore.Qt.Unchecked
+        )
+        self.channel_table.setItem(row, self.COL_SET_V, set_v_item)
+
+        set_i_item = QtWidgets.QTableWidgetItem()
+        set_i_item.setFlags(set_i_item.flags() | QtCore.Qt.ItemIsUserCheckable)
+        set_i_item.setCheckState(
+            QtCore.Qt.Checked if source_mode == "i" else QtCore.Qt.Unchecked
+        )
+        self.channel_table.setItem(row, self.COL_SET_I, set_i_item)
+        self._normalize_source_checks(row)
 
         measure_voltage = data.get("measure_voltage")
         measure_current = data.get("measure_current")
@@ -718,6 +758,17 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         combo.currentTextChanged.connect(self._on_waveform_changed_for_widget)
         self.channel_table.setCellWidget(row, self.COL_WAVEFORM, combo)
 
+        set_v_item = QtWidgets.QTableWidgetItem()
+        set_v_item.setFlags(set_v_item.flags() | QtCore.Qt.ItemIsUserCheckable)
+        set_v_item.setCheckState(QtCore.Qt.Checked)
+        self.channel_table.setItem(row, self.COL_SET_V, set_v_item)
+
+        set_i_item = QtWidgets.QTableWidgetItem()
+        set_i_item.setFlags(set_i_item.flags() | QtCore.Qt.ItemIsUserCheckable)
+        set_i_item.setCheckState(QtCore.Qt.Unchecked)
+        self.channel_table.setItem(row, self.COL_SET_I, set_i_item)
+        self._normalize_source_checks(row)
+
         meas_v_item = QtWidgets.QTableWidgetItem()
         meas_v_item.setFlags(meas_v_item.flags() | QtCore.Qt.ItemIsUserCheckable)
         meas_v_item.setCheckState(QtCore.Qt.Unchecked)
@@ -771,7 +822,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
         traces = build_traces(configs, dt_list, repeat, round_delay)
         mode = "subplot" if self.subplot_radio.isChecked() else "overlay"
-        self.plot.plot(traces, mode)
+        y_label = self._source_axis_label(configs)
+        self.plot.plot(traces, mode, y_label=y_label)
 
     def _collect_channel_configs(self) -> list[ChannelConfig]:
         configs: list[ChannelConfig] = []
@@ -804,6 +856,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             link_next = (
                 self.channel_table.item(row, self.COL_LINK).checkState() == QtCore.Qt.Checked
             )
+            source_mode = self._source_mode_for_row(row)
             measure_voltage = (
                 self.channel_table.item(row, self.COL_MEAS_V).checkState()
                 == QtCore.Qt.Checked
@@ -818,6 +871,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                     channel_name=channel_name,
                     name=name,
                     waveform=waveform,
+                    source_mode=source_mode,
                     measure_voltage=measure_voltage,
                     measure_current=measure_current,
                     start_voltage=start_voltage,
@@ -855,6 +909,91 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         if isinstance(widget, QtWidgets.QComboBox):
             return widget.currentText()
         return "Triangle"
+
+    def _on_channel_item_changed(self, item: QtWidgets.QTableWidgetItem) -> None:
+        if self._suppress_item_changed:
+            return
+        col = item.column()
+        if col not in (self.COL_SET_V, self.COL_SET_I):
+            return
+        row = item.row()
+        self._suppress_item_changed = True
+        try:
+            self._normalize_source_checks(row, changed_col=col)
+        finally:
+            self._suppress_item_changed = False
+        if row == self.channel_table.currentRow():
+            self._update_source_labels_for_row(row)
+
+    def _normalize_source_checks(self, row: int, changed_col: int | None = None) -> None:
+        set_v_item = self.channel_table.item(row, self.COL_SET_V)
+        set_i_item = self.channel_table.item(row, self.COL_SET_I)
+        if set_v_item is None or set_i_item is None:
+            return
+        set_v = set_v_item.checkState() == QtCore.Qt.Checked
+        set_i = set_i_item.checkState() == QtCore.Qt.Checked
+
+        if changed_col == self.COL_SET_V and set_v:
+            set_i_item.setCheckState(QtCore.Qt.Unchecked)
+            return
+        if changed_col == self.COL_SET_I and set_i:
+            set_v_item.setCheckState(QtCore.Qt.Unchecked)
+            return
+
+        if set_v and set_i:
+            if changed_col == self.COL_SET_I:
+                set_v_item.setCheckState(QtCore.Qt.Unchecked)
+            else:
+                set_i_item.setCheckState(QtCore.Qt.Unchecked)
+            return
+
+        if not set_v and not set_i:
+            set_v_item.setCheckState(QtCore.Qt.Checked)
+
+    def _source_mode_for_row(self, row: int) -> str:
+        set_v_item = self.channel_table.item(row, self.COL_SET_V)
+        set_i_item = self.channel_table.item(row, self.COL_SET_I)
+        if set_v_item is None or set_i_item is None:
+            return "v"
+        set_v = set_v_item.checkState() == QtCore.Qt.Checked
+        set_i = set_i_item.checkState() == QtCore.Qt.Checked
+        if set_i and not set_v:
+            return "i"
+        if set_v and not set_i:
+            return "v"
+        self._suppress_item_changed = True
+        try:
+            self._normalize_source_checks(row)
+        finally:
+            self._suppress_item_changed = False
+        return "v"
+
+    def _update_source_labels_for_row(self, row: int) -> None:
+        self._update_source_labels(self._source_mode_for_row(row))
+
+    def _update_source_labels(self, mode: str) -> None:
+        symbol = "I" if mode == "i" else "V"
+        self.tri_start_label.setText(f"Start {symbol}")
+        self.tri_dv_label.setText(f"d{symbol}")
+        self.sq_v_high_label.setText(f"{symbol} High")
+        self.sq_v_low_label.setText(f"{symbol} Low")
+        self.sq3_v_high_label.setText(f"{symbol} High")
+        self.sq3_v_low_label.setText(f"{symbol} Low")
+        self.sq3_v_mid_label.setText(f"{symbol} Mid")
+        self.sine_v_amp_label.setText(f"{symbol} Amp")
+        self.sine_v_offset_label.setText(f"{symbol} Offset")
+        self.fixed_v_label.setText(f"{symbol} Fixed")
+        self.ramp_step_label.setText(f"ramp_d{symbol}")
+
+    @staticmethod
+    def _source_axis_label(configs: list[ChannelConfig]) -> str:
+        modes = {str(cfg.source_mode).strip().lower() for cfg in configs}
+        modes.discard("")
+        if not modes or modes == {"v"}:
+            return "Voltage (V)"
+        if modes == {"i"}:
+            return "Current (A)"
+        return "Source (V/A)"
 
     def _on_waveform_changed_for_widget(self, _value: str) -> None:
         combo = self.sender()
@@ -898,7 +1037,13 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                 text = value[1]
                 check = value[2]
                 item = QtWidgets.QTableWidgetItem(text)
-                if col in (self.COL_LINK, self.COL_MEAS_V, self.COL_MEAS_I):
+                if col in (
+                    self.COL_LINK,
+                    self.COL_SET_V,
+                    self.COL_SET_I,
+                    self.COL_MEAS_V,
+                    self.COL_MEAS_I,
+                ):
                     item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
                     item.setCheckState(check)
                 self.channel_table.setItem(row, col, item)
@@ -908,6 +1053,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             if state_item is not None:
                 state_item.setData(QtCore.Qt.UserRole, data["__state__"])
 
+        self._normalize_source_checks(row)
         if row == self.channel_table.currentRow():
             self._load_details_from_row(row)
 
@@ -925,10 +1071,12 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.tri_first = QtWidgets.QLineEdit("0.0")
         self.tri_second = QtWidgets.QLineEdit("0.0")
         self.tri_dv = QtWidgets.QLineEdit("0.0")
-        tri_layout.addRow("Start V", self.tri_start)
+        self.tri_start_label = QtWidgets.QLabel("Start V")
+        self.tri_dv_label = QtWidgets.QLabel("dV")
+        tri_layout.addRow(self.tri_start_label, self.tri_start)
         tri_layout.addRow("First Node", self.tri_first)
         tri_layout.addRow("Second Node", self.tri_second)
-        tri_layout.addRow("dV", self.tri_dv)
+        tri_layout.addRow(self.tri_dv_label, self.tri_dv)
 
         # Square params
         self.square_group = QtWidgets.QGroupBox("Square Params")
@@ -939,8 +1087,10 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.sq_n_low = QtWidgets.QLineEdit("10")
         self.sq_n_ramp = QtWidgets.QLineEdit("0")
         self.sq_n_offset = QtWidgets.QLineEdit("0")
-        sq_layout.addRow("V High", self.sq_v_high)
-        sq_layout.addRow("V Low", self.sq_v_low)
+        self.sq_v_high_label = QtWidgets.QLabel("V High")
+        self.sq_v_low_label = QtWidgets.QLabel("V Low")
+        sq_layout.addRow(self.sq_v_high_label, self.sq_v_high)
+        sq_layout.addRow(self.sq_v_low_label, self.sq_v_low)
         sq_layout.addRow("n_high", self.sq_n_high)
         sq_layout.addRow("n_low", self.sq_n_low)
         sq_layout.addRow("n_ramp", self.sq_n_ramp)
@@ -956,9 +1106,12 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.sq3_n_low = QtWidgets.QLineEdit("10")
         self.sq3_n_mid = QtWidgets.QLineEdit("10")
         self.sq3_n_offset = QtWidgets.QLineEdit("0")
-        sq3_layout.addRow("V High", self.sq3_v_high)
-        sq3_layout.addRow("V Low", self.sq3_v_low)
-        sq3_layout.addRow("V Mid", self.sq3_v_mid)
+        self.sq3_v_high_label = QtWidgets.QLabel("V High")
+        self.sq3_v_low_label = QtWidgets.QLabel("V Low")
+        self.sq3_v_mid_label = QtWidgets.QLabel("V Mid")
+        sq3_layout.addRow(self.sq3_v_high_label, self.sq3_v_high)
+        sq3_layout.addRow(self.sq3_v_low_label, self.sq3_v_low)
+        sq3_layout.addRow(self.sq3_v_mid_label, self.sq3_v_mid)
         sq3_layout.addRow("n_high", self.sq3_n_high)
         sq3_layout.addRow("n_low", self.sq3_n_low)
         sq3_layout.addRow("n_mid", self.sq3_n_mid)
@@ -970,15 +1123,18 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.sine_v_amp = QtWidgets.QLineEdit("0.0")
         self.sine_v_offset = QtWidgets.QLineEdit("0.0")
         self.sine_n_period = QtWidgets.QLineEdit("100")
-        sine_layout.addRow("V Amp", self.sine_v_amp)
-        sine_layout.addRow("V Offset", self.sine_v_offset)
+        self.sine_v_amp_label = QtWidgets.QLabel("V Amp")
+        self.sine_v_offset_label = QtWidgets.QLabel("V Offset")
+        sine_layout.addRow(self.sine_v_amp_label, self.sine_v_amp)
+        sine_layout.addRow(self.sine_v_offset_label, self.sine_v_offset)
         sine_layout.addRow("n_period", self.sine_n_period)
 
         # Fixed params
         self.fixed_group = QtWidgets.QGroupBox("Fixed Params")
         fixed_layout = QtWidgets.QFormLayout(self.fixed_group)
         self.fixed_v = QtWidgets.QLineEdit("0.0")
-        fixed_layout.addRow("V Fixed", self.fixed_v)
+        self.fixed_v_label = QtWidgets.QLabel("V Fixed")
+        fixed_layout.addRow(self.fixed_v_label, self.fixed_v)
 
         # CSV params
         self.csv_group = QtWidgets.QGroupBox("CSV Params")
@@ -1011,6 +1167,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
     def _load_details_from_row(self, row: int) -> None:
         state = self._get_row_state(row)
+        self._update_source_labels_for_row(row)
         self.detail_title.setText(f"Channel Details: {state['channel_name']}")
         waveform = state["waveform"]
         self._update_detail_visibility(waveform)
@@ -1213,8 +1370,13 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             ramp_dv = float(self.ramp_dv.text().strip() or "5e-5")
             ramp_dt = float(self.ramp_dt.text().strip() or "1e-3")
             for sweeper in sweepers:
-                utilities.ramp_voltage(
-                    sweeper["channel"], 0, rampdV=ramp_dv, rampdT=ramp_dt
+                utilities.set_source_mode(sweeper["channel"], sweeper["source_mode"])
+                utilities.ramp_source(
+                    sweeper["channel"],
+                    0,
+                    rampdV=ramp_dv,
+                    rampdT=ramp_dt,
+                    source_mode=sweeper["source_mode"],
                 )
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Ramp Failed", str(exc))

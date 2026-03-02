@@ -23,13 +23,33 @@ COLOR_CYCLE = [
 ]
 
 
-def ramp_voltage(channel, final, rampdV=5e-5, rampdT=1e-3):
-    initial = channel.volt()
+def set_source_mode(channel, source_mode: str) -> None:
+    mode = str(source_mode).strip().lower()
+    if mode not in {"v", "i"}:
+        mode = "v"
+    mode_param = getattr(channel, "mode", None)
+    if callable(mode_param):
+        try:
+            mode_param("current" if mode == "i" else "voltage")
+        except Exception:
+            pass
+
+
+def ramp_source(channel, final, rampdV=5e-5, rampdT=1e-3, source_mode: str = "v"):
+    mode = str(source_mode).strip().lower()
+    if mode not in {"v", "i"}:
+        mode = "v"
+    source_param = channel.curr if mode == "i" else channel.volt
+    initial = source_param()
     ramp = np.linspace(initial, final, int(1 + abs((initial - final) / rampdV)))
     log.info("ramping %s from %s to %s", channel, initial, final)
     for x in ramp:
-        channel.volt(x)
+        source_param(x)
         sleep(rampdT)
+
+
+def ramp_voltage(channel, final, rampdV=5e-5, rampdT=1e-3):
+    ramp_source(channel, final, rampdV=rampdV, rampdT=rampdT, source_mode="v")
 
 
 def ensure_meas_v_parameter(channel):
@@ -78,17 +98,41 @@ def setup_database_registers_arb(
 ):
     time = ElapsedTimeParameter("time")
     meas_forward = Measurement(exp=test_exp, station=station, name=measurement_name)
+    registered: set[str] = set()
+
+    def _param_key(param) -> str:
+        return str(getattr(param, "full_name", None) or getattr(param, "name", ""))
+
+    def _register_param(param, setpoints=None, label_base: str | None = None) -> None:
+        if param is None:
+            return
+        key = _param_key(param)
+        if key in registered:
+            return
+        if label_base:
+            param.label = label_base
+        if setpoints:
+            meas_forward.register_parameter(param, setpoints=setpoints)
+        else:
+            meas_forward.register_parameter(param)
+        registered.add(key)
 
     independent_params = []
     for sweeper in sweepers:
         channel = sweeper["channel"]
+        source_mode = str(sweeper.get("source_mode", "v")).strip().lower()
+        if source_mode not in {"v", "i"}:
+            source_mode = "v"
+        source_param = channel.curr if source_mode == "i" else channel.volt
         if sweeper["independent"]:
-            meas_forward.register_parameter(channel.volt)
-            independent_params.append(channel.volt)
+            _register_param(source_param)
+            if source_param not in independent_params:
+                independent_params.append(source_param)
 
     if time_independent:
-        meas_forward.register_parameter(time)
-        independent_params.append(time)
+        _register_param(time)
+        if time not in independent_params:
+            independent_params.append(time)
 
     for sweeper in sweepers:
         channel = sweeper["channel"]
@@ -99,10 +143,14 @@ def setup_database_registers_arb(
             label_base = f"{channel_name} | {user_name}" if channel_name else user_name
         measure_current = bool(sweeper.get("measure_current", True))
         measure_voltage = bool(sweeper.get("measure_voltage", False))
-        if measure_current:
+        source_mode = str(sweeper.get("source_mode", "v")).strip().lower()
+        if source_mode not in {"v", "i"}:
+            source_mode = "v"
+        source_param = channel.curr if source_mode == "i" else channel.volt
+        if measure_current and source_mode != "i":
             if label_base:
                 channel.curr.label = label_base
-            meas_forward.register_parameter(channel.curr, setpoints=(*independent_params,))
+            _register_param(channel.curr, setpoints=(*independent_params,))
         if measure_voltage:
             meas_v_param = sweeper.get("meas_v_param")
             if meas_v_param is None:
@@ -110,13 +158,11 @@ def setup_database_registers_arb(
                 sweeper["meas_v_param"] = meas_v_param
             if label_base:
                 meas_v_param.label = label_base
-            meas_forward.register_parameter(meas_v_param, setpoints=(*independent_params,))
+            _register_param(meas_v_param, setpoints=(*independent_params,))
         if not sweeper["independent"]:
-            if label_base:
-                channel.volt.label = label_base
-            meas_forward.register_parameter(channel.volt, setpoints=(*independent_params,))
+            _register_param(source_param, setpoints=(*independent_params,), label_base=label_base)
 
     if not time_independent:
-        meas_forward.register_parameter(time, setpoints=(*independent_params,))
+        _register_param(time, setpoints=(*independent_params,))
 
     return meas_forward, time, independent_params
