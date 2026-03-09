@@ -21,7 +21,7 @@ from qcodes.station import Station
 
 from . import utilities
 from .voltage_sweeper import RunWorker, build_sweepers
-from .waveform_maker import ChannelConfig, build_traces
+from .waveform_maker import ChannelConfig, build_traces, build_v_range
 
 
 class WaveformPlot(FigureCanvasQTAgg):
@@ -765,11 +765,11 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             dt_list = self._parse_float_list(self.dt_list.text())
             repeat = int(self.repeat.text().strip() or "1")
             round_delay = float(self.round_delay.text().strip() or "0")
+            traces = build_traces(configs, dt_list, repeat, round_delay)
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Invalid Input", str(exc))
             return
 
-        traces = build_traces(configs, dt_list, repeat, round_delay)
         mode = "subplot" if self.subplot_radio.isChecked() else "overlay"
         self.plot.plot(traces, mode)
 
@@ -1046,7 +1046,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         row = self.channel_table.currentRow()
         if row < 0:
             return
-        state = self._get_row_state(row)
+        state = dict(self._get_row_state(row))
         waveform = self._get_waveform_value(row)
         state["waveform"] = waveform
 
@@ -1080,7 +1080,44 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         state["v_fixed"] = self.fixed_v.text()
         state["csv_path"] = self.csv_path.text().strip()
 
+        if waveform.lower() == "triangle" and not self._validate_triangle_state(state):
+            return
+
         self._set_row_state(row, state)
+
+    @staticmethod
+    def _validate_triangle_state(state: dict[str, Any]) -> bool:
+        try:
+            cfg = ChannelConfig(
+                channel_name="validation",
+                name="validation",
+                waveform="triangle",
+                measure_voltage=False,
+                measure_current=False,
+                start_voltage=float(state["start_voltage"]),
+                first_node=float(state["first_node"]),
+                second_node=float(state["second_node"]),
+                dV=float(state["dV"]),
+                v_high=0.0,
+                v_low=0.0,
+                v_mid=0.0,
+                v_fixed=0.0,
+                n_high=0,
+                n_low=0,
+                n_mid=0,
+                n_ramp=0,
+                n_offset=0,
+                v_amp=0.0,
+                v_offset=0.0,
+                n_period=1,
+                csv_path="",
+                independent=False,
+                link_next=False,
+            )
+            build_v_range(cfg)
+            return True
+        except Exception:
+            return False
 
     def _on_browse_csv(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(

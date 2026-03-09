@@ -36,6 +36,33 @@ class ChannelConfig:
     link_next: bool
 
 
+def _build_triangle_leg(
+    start: float,
+    stop: float,
+    step: float,
+    *,
+    include_stop: bool,
+) -> np.ndarray:
+    delta = stop - start
+    if np.isclose(delta, 0.0, atol=1e-12):
+        vals = np.array([start], dtype=float)
+        return vals if include_stop else vals[:-1]
+
+    n_steps = int(round(abs(delta) / step))
+    if n_steps <= 0 or not np.isclose(
+        n_steps * step, abs(delta), rtol=0.0, atol=max(1e-12, step * 1e-9)
+    ):
+        raise ValueError(
+            "Triangle segments must be integer multiples of dV "
+            f"(start={start}, stop={stop}, dV={step})."
+        )
+
+    direction = 1.0 if delta > 0 else -1.0
+    vals = start + direction * step * np.arange(n_steps + 1, dtype=float)
+    vals[-1] = stop
+    return vals if include_stop else vals[:-1]
+
+
 def build_v_range(cfg: ChannelConfig, square_final_low: bool = True) -> np.ndarray:
     if cfg.waveform.lower() == "csv":
         return build_csv_wave(cfg)
@@ -48,15 +75,28 @@ def build_v_range(cfg: ChannelConfig, square_final_low: bool = True) -> np.ndarr
     if cfg.waveform.lower() == "fixed":
         return np.array([cfg.v_fixed], dtype=float)
 
-    if cfg.dV == 0:
+    step = abs(float(cfg.dV))
+    if step == 0:
         return np.array([cfg.start_voltage], dtype=float)
 
-    n = 1 + abs(int((cfg.first_node - cfg.start_voltage) / cfg.dV))
-    v_range1 = np.linspace(cfg.start_voltage, cfg.first_node, n)[:-1]
-    n = 1 + abs(int((cfg.second_node - cfg.first_node) / cfg.dV))
-    v_range2 = np.linspace(cfg.first_node, cfg.second_node, n)[:-1]
-    n = 1 + abs(int((cfg.start_voltage - cfg.second_node) / cfg.dV))
-    v_range3 = np.linspace(cfg.second_node, cfg.start_voltage, n)
+    v_range1 = _build_triangle_leg(
+        cfg.start_voltage,
+        cfg.first_node,
+        step,
+        include_stop=False,
+    )
+    v_range2 = _build_triangle_leg(
+        cfg.first_node,
+        cfg.second_node,
+        step,
+        include_stop=False,
+    )
+    v_range3 = _build_triangle_leg(
+        cfg.second_node,
+        cfg.start_voltage,
+        step,
+        include_stop=True,
+    )
     return np.concatenate((v_range1, v_range2, v_range3))
 
 
