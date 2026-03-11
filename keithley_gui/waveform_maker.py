@@ -19,6 +19,8 @@ class ChannelConfig:
     first_node: float
     second_node: float
     dV: float
+    v_inc: float
+    n_repeat: int
     v_high: float
     v_low: float
     v_mid: float
@@ -62,7 +64,6 @@ def _build_triangle_leg(
     vals[-1] = stop
     return vals if include_stop else vals[:-1]
 
-
 def build_v_range(cfg: ChannelConfig, square_final_low: bool = True) -> np.ndarray:
     if cfg.waveform.lower() == "csv":
         return build_csv_wave(cfg)
@@ -97,7 +98,18 @@ def build_v_range(cfg: ChannelConfig, square_final_low: bool = True) -> np.ndarr
         step,
         include_stop=True,
     )
-    return np.concatenate((v_range1, v_range2, v_range3))
+
+    n_repeat = max(1, int(cfg.n_repeat))
+    v_inc = float(cfg.v_inc)
+
+    base = np.concatenate((v_range1, v_range2, v_range3))
+
+    if n_repeat == 1:
+        return base
+    
+    cycles = [base + (idx * v_inc) for idx in range(n_repeat)]
+    return np.concatenate(cycles)
+
 
 
 def build_square_wave(cfg: ChannelConfig, include_final_low: bool = True) -> np.ndarray:
