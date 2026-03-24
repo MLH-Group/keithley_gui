@@ -34,6 +34,7 @@ class ChannelConfig:
     csv_path: str
     independent: bool
     link_next: bool
+    custom_wave: list[float] | np.ndarray | None = None
 
 
 def _build_triangle_leg(
@@ -64,6 +65,8 @@ def _build_triangle_leg(
 
 
 def build_v_range(cfg: ChannelConfig, square_final_low: bool = True) -> np.ndarray:
+    if cfg.waveform.lower() == "custom":
+        return build_custom_wave(cfg)
     if cfg.waveform.lower() == "csv":
         return build_csv_wave(cfg)
     if cfg.waveform.lower() == "square":
@@ -173,6 +176,23 @@ def build_csv_wave(cfg: ChannelConfig) -> np.ndarray:
     data = data[np.isfinite(data)]
     if data.size == 0:
         raise ValueError(f"CSV waveform file has no numeric values: {path}")
+    return data
+
+
+def build_custom_wave(cfg: ChannelConfig) -> np.ndarray:
+    raw = cfg.custom_wave
+    if raw is None:
+        raise ValueError(
+            "Custom waveform selected but no data is assigned. "
+            "Use Open Wave Composer in Channels / Waveforms."
+        )
+    data = np.asarray(raw, dtype=float).ravel()
+    data = data[np.isfinite(data)]
+    if data.size == 0:
+        raise ValueError(
+            "Custom waveform selected but data is empty. "
+            "Use Open Wave Composer in Channels / Waveforms."
+        )
     return data
 
 

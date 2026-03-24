@@ -22,6 +22,7 @@ from qcodes.station import Station
 from . import utilities
 from .voltage_sweeper import RunWorker, build_sweepers
 from .waveform_maker import ChannelConfig, build_traces, build_v_range
+from .wave_composer_dialog import WaveComposerDialog
 
 
 class WaveformPlot(FigureCanvasQTAgg):
@@ -92,6 +93,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.keithleys: dict[str, Any] = {}
         self.run_thread: QtCore.QThread | None = None
         self.run_worker: RunWorker | None = None
+        self.wave_composer_window: WaveComposerDialog | None = None
 
         root = QtWidgets.QWidget()
         self.setCentralWidget(root)
@@ -211,6 +213,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
         # Left table: compact channel list.
         self.channel_table = QtWidgets.QTableWidget(0, 6)
+        self.channel_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.channel_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.channel_table.setHorizontalHeaderLabels(
             [
                 "Channel",
@@ -247,6 +251,9 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.move_down_btn.clicked.connect(self._move_row_down)
         btn_row.addWidget(self.move_up_btn)
         btn_row.addWidget(self.move_down_btn)
+        self.open_wave_composer_btn = QtWidgets.QPushButton("Open Wave Composer")
+        self.open_wave_composer_btn.clicked.connect(self._on_open_wave_composer)
+        btn_row.addWidget(self.open_wave_composer_btn)
         btn_row.addStretch(1)
 
         # Right panel: per-channel detail editor.
@@ -578,14 +585,14 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         channel_name = str(data.get("channel_name", f"row{row}"))
         name = str(data.get("name", channel_name))
         waveform = str(data.get("waveform", "Triangle"))
-        if waveform not in {"Triangle", "Square", "Square-3", "Sine", "Fixed"}:
+        if waveform not in {"Triangle", "Square", "Square-3", "Sine", "Fixed", "CSV", "Custom"}:
             waveform = "Triangle"
 
         self.channel_table.setItem(row, self.COL_CHANNEL, QtWidgets.QTableWidgetItem(channel_name))
         self.channel_table.setItem(row, self.COL_NAME, QtWidgets.QTableWidgetItem(name))
 
         combo = QtWidgets.QComboBox()
-        combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed", "CSV"])
+        combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed", "CSV", "Custom"])
         combo.setCurrentText(waveform)
         combo.setProperty("row", row)
         combo.currentTextChanged.connect(self._on_waveform_changed_for_widget)
@@ -694,6 +701,18 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Failed To Open Plotter", str(exc))
 
+    def _on_open_wave_composer(self) -> None:
+        try:
+            if self.wave_composer_window is None:
+                self.wave_composer_window = WaveComposerDialog(
+                    self, apply_to_channels_cb=self._apply_wave_to_selected_channels
+                )
+            self.wave_composer_window.show()
+            self.wave_composer_window.raise_()
+            self.wave_composer_window.activateWindow()
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Failed To Open Wave Composer", str(exc))
+
     def _populate_channels(self) -> None:
         self.channel_table.setRowCount(0)
         for kname, inst in self.keithleys.items():
@@ -712,7 +731,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         )
 
         combo = QtWidgets.QComboBox()
-        combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed", "CSV"])
+        combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed", "CSV", "Custom"])
         combo.setCurrentText("Triangle")
         combo.setProperty("row", row)
         combo.currentTextChanged.connect(self._on_waveform_changed_for_widget)
@@ -800,6 +819,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             v_offset = float(state["v_offset"])
             n_period = int(state["n_period"])
             csv_path = str(state.get("csv_path", "")).strip()
+            custom_wave = state.get("custom_wave")
 
             link_next = (
                 self.channel_table.item(row, self.COL_LINK).checkState() == QtCore.Qt.Checked
@@ -839,6 +859,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                     csv_path=csv_path,
                     independent=False,
                     link_next=link_next,
+                    custom_wave=custom_wave,
                 )
             )
         return configs
@@ -855,6 +876,52 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         if isinstance(widget, QtWidgets.QComboBox):
             return widget.currentText()
         return "Triangle"
+
+    def _selected_rows(self) -> list[int]:
+        selection_model = self.channel_table.selectionModel()
+        rows = (
+            sorted({index.row() for index in selection_model.selectedRows()})
+            if selection_model is not None
+            else []
+        )
+        if rows:
+            return rows
+        current = self.channel_table.currentRow()
+        return [current] if current >= 0 else []
+
+    def _apply_wave_to_selected_channels(self, wave: np.ndarray) -> str:
+        arr = np.asarray(wave, dtype=float).ravel()
+        arr = arr[np.isfinite(arr)]
+        if arr.size == 0:
+            raise ValueError("Generated waveform has no finite values to apply.")
+
+        rows = self._selected_rows()
+        if not rows:
+            raise ValueError("Select at least one channel row to apply the waveform.")
+
+        applied_names: list[str] = []
+        for row in rows:
+            state = dict(self._get_row_state(row))
+            state["custom_wave"] = arr.tolist()
+            state["waveform"] = "Custom"
+            self._set_row_state(row, state)
+
+            widget = self.channel_table.cellWidget(row, self.COL_WAVEFORM)
+            if isinstance(widget, QtWidgets.QComboBox):
+                widget.setCurrentText("Custom")
+
+            name_item = self.channel_table.item(row, self.COL_NAME)
+            channel_item = self.channel_table.item(row, self.COL_CHANNEL)
+            label = (
+                name_item.text().strip()
+                if name_item is not None and name_item.text().strip()
+                else (channel_item.text().strip() if channel_item is not None else f"row{row}")
+            )
+            applied_names.append(label)
+
+        if self.channel_table.currentRow() >= 0:
+            self._load_details_from_row(self.channel_table.currentRow())
+        return f"Applied custom waveform ({arr.size} points) to: {', '.join(applied_names)}"
 
     def _on_waveform_changed_for_widget(self, _value: str) -> None:
         combo = self.sender()
@@ -889,7 +956,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                 continue
             if value[0] == "combo":
                 combo = QtWidgets.QComboBox()
-                combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed", "CSV"])
+                combo.addItems(["Triangle", "Square", "Square-3", "Sine", "Fixed", "CSV", "Custom"])
                 combo.setCurrentText(value[1])
                 combo.setProperty("row", row)
                 combo.currentTextChanged.connect(self._on_waveform_changed_for_widget)
@@ -989,12 +1056,22 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         csv_layout.addWidget(self.csv_path, 1)
         csv_layout.addWidget(self.csv_browse_btn)
 
+        # Custom waveform info
+        self.custom_group = QtWidgets.QGroupBox("Custom Params")
+        custom_layout = QtWidgets.QVBoxLayout(self.custom_group)
+        self.custom_info = QtWidgets.QLabel("No custom waveform assigned.")
+        self.custom_open_btn = QtWidgets.QPushButton("Open Wave Composer")
+        self.custom_open_btn.clicked.connect(self._on_open_wave_composer)
+        custom_layout.addWidget(self.custom_info)
+        custom_layout.addWidget(self.custom_open_btn)
+
         layout.addWidget(self.tri_group)
         layout.addWidget(self.square_group)
         layout.addWidget(self.square3_group)
         layout.addWidget(self.sine_group)
         layout.addWidget(self.fixed_group)
         layout.addWidget(self.csv_group)
+        layout.addWidget(self.custom_group)
 
         self.save_detail_btn = QtWidgets.QPushButton("Apply To Selected Channel")
         self.save_detail_btn.clicked.connect(self._on_apply_details)
@@ -1041,6 +1118,9 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
         self.fixed_v.setText(str(state["v_fixed"]))
         self.csv_path.setText(str(state.get("csv_path", "")))
+        custom_wave = state.get("custom_wave")
+        custom_points = len(custom_wave) if isinstance(custom_wave, list) else 0
+        self.custom_info.setText(f"Assigned points: {custom_points}")
 
     def _on_apply_details(self) -> None:
         row = self.channel_table.currentRow()
@@ -1134,6 +1214,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.sine_group.setVisible(wf == "sine")
         self.fixed_group.setVisible(wf == "fixed")
         self.csv_group.setVisible(wf == "csv")
+        self.custom_group.setVisible(wf == "custom")
 
     def _get_row_state(self, row: int) -> dict[str, Any]:
         # Persist per-row detail state on the row item itself.
@@ -1177,6 +1258,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             "v_offset": "0.0",
             "n_period": "100",
             "csv_path": "",
+            "custom_wave": [],
         }
 
     def _set_row_state_defaults(self, row: int) -> None:
