@@ -39,6 +39,9 @@ def build_sweepers(
                 "start_voltage": cfg.start_voltage,
                 "dV": cfg.dV,
                 "independent": cfg.independent,
+                "link_next": cfg.link_next,
+                "threshold_value": float(cfg.threshold_value),
+                "threshold_action": str(cfg.threshold_action).strip().lower(),
                 "v_range": v_range,
             }
         )
@@ -52,10 +55,75 @@ def resolve_csv_path(base: str, device: str, exp: str, run_id: int) -> str:
     return os.path.join(base, f"{device}{exp}_{run_id}_manual_sweep.csv")
 
 
+def _iter_linked_groups(
+    sweepers: list[dict[str, Any]],
+    targets: list[float],
+) -> list[tuple[list[dict[str, Any]], list[float]]]:
+    if len(sweepers) != len(targets):
+        raise ValueError("sweepers and targets length mismatch")
+
+    groups: list[tuple[list[dict[str, Any]], list[float]]] = []
+    current_sweepers: list[dict[str, Any]] = []
+    current_targets: list[float] = []
+
+    for sweeper, target in zip(sweepers, targets):
+        current_sweepers.append(sweeper)
+        current_targets.append(float(target))
+        if not bool(sweeper.get("link_next", False)):
+            groups.append((current_sweepers, current_targets))
+            current_sweepers = []
+            current_targets = []
+
+    if current_sweepers:
+        groups.append((current_sweepers, current_targets))
+    return groups
+
+
+def _ramp_channels_together(
+    channels: list[Any],
+    targets: list[float],
+    ramp_dv: float,
+    ramp_dt: float,
+) -> None:
+    initial = [float(ch.volt()) for ch in channels]
+    targets_f = [float(v) for v in targets]
+    max_delta = max(abs(vf - v0) for v0, vf in zip(initial, targets_f))
+    n_steps = max(1, int(1 + (max_delta / ramp_dv)))
+
+    for step in range(1, n_steps + 1):
+        frac = step / n_steps
+        for ch, v0, vf in zip(channels, initial, targets_f):
+            ch.volt(v0 + (vf - v0) * frac)
+        if ramp_dt > 0:
+            time.sleep(ramp_dt)
+
+
+def ramp_sweepers_with_linking(
+    sweepers: list[dict[str, Any]],
+    targets: list[float],
+    ramp_dv: float,
+    ramp_dt: float,
+) -> None:
+    for group_sweepers, group_targets in _iter_linked_groups(sweepers, targets):
+        if len(group_sweepers) <= 1:
+            sweeper = group_sweepers[0]
+            utilities.ramp_voltage(
+                sweeper["channel"],
+                group_targets[0],
+                rampdV=ramp_dv,
+                rampdT=ramp_dt,
+            )
+            continue
+
+        channels = [s["channel"] for s in group_sweepers]
+        _ramp_channels_together(channels, group_targets, ramp_dv, ramp_dt)
+
+
 class RunWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
     status = QtCore.pyqtSignal(str)
     error = QtCore.pyqtSignal(str)
+    threshold_event = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -73,6 +141,8 @@ class RunWorker(QtCore.QObject):
         csv_path: str,
         ramp_up: bool,
         ramp_down: bool,
+        ramp_dv: float,
+        ramp_dt: float,
         time_independent: bool,
     ) -> None:
         super().__init__()
@@ -90,6 +160,8 @@ class RunWorker(QtCore.QObject):
         self.csv_path = csv_path
         self.ramp_up = ramp_up
         self.ramp_down = ramp_down
+        self.ramp_dv = ramp_dv
+        self.ramp_dt = ramp_dt
         self.time_independent = time_independent
 
         self._pause_event = threading.Event()
@@ -153,8 +225,13 @@ class RunWorker(QtCore.QObject):
             meas_forward.write_period = 2
 
             if self.ramp_up:
-                for sweeper in sweepers:
-                    utilities.ramp_voltage(sweeper["channel"], sweeper["v_range"][0])
+                ramp_targets = [float(sweeper["v_range"][0]) for sweeper in sweepers]
+                ramp_sweepers_with_linking(
+                    sweepers,
+                    ramp_targets,
+                    self.ramp_dv,
+                    self.ramp_dt,
+                )
 
             for sweeper in sweepers:
                 ch = sweeper["channel"]
@@ -284,6 +361,29 @@ class RunWorker(QtCore.QObject):
                         *get_readings,
                         (time_param, t),
                     )
+                    (
+                        threshold_action,
+                        threshold_status_msg,
+                        threshold_popup_msg,
+                    ) = self._evaluate_threshold_action(
+                        sweepers,
+                        measured_volt,
+                        measured_curr,
+                    )
+                    if threshold_action == "stop":
+                        self._stop_requested = True
+                        self._pause_event.set()
+                        self.status.emit(threshold_status_msg or "Stopped by threshold.")
+                        self.threshold_event.emit(
+                            threshold_popup_msg or threshold_status_msg or "Stopped by threshold."
+                        )
+                    elif threshold_action == "pause":
+                        self.is_paused = True
+                        self._pause_event.clear()
+                        self.status.emit(threshold_status_msg or "Paused by threshold.")
+                        self.threshold_event.emit(
+                            threshold_popup_msg or threshold_status_msg or "Paused by threshold."
+                        )
                     step_end = time.perf_counter()
 
                     next_measure_deadline += dt_in
@@ -314,13 +414,72 @@ class RunWorker(QtCore.QObject):
                 data_forward.to_pandas_dataframe().to_csv(csv_file)
 
             if self.ramp_down:
-                for sweeper in sweepers:
-                    utilities.ramp_voltage(sweeper["channel"], 0)
+                ramp_sweepers_with_linking(
+                    sweepers,
+                    [0.0] * len(sweepers),
+                    self.ramp_dv,
+                    self.ramp_dt,
+                )
 
             self.finished.emit()
         except Exception as exc:
             self.error.emit(str(exc))
             self.finished.emit()
+
+    @staticmethod
+    def _evaluate_threshold_action(
+        sweepers: list[dict[str, Any]],
+        measured_volt: dict[Any, float],
+        measured_curr: dict[Any, float],
+    ) -> tuple[str | None, str | None, str | None]:
+        best_action: str | None = None
+        best_status_message: str | None = None
+        best_popup_message: str | None = None
+        action_priority = {"pause": 1, "stop": 2}
+
+        for sweeper in sweepers:
+            threshold = float(sweeper.get("threshold_value", 0.0) or 0.0)
+            if threshold <= 0:
+                continue
+            action = str(sweeper.get("threshold_action", "none")).strip().lower()
+            if action not in ("pause", "stop"):
+                continue
+
+            ch = sweeper["channel"]
+            channel_name = str(sweeper.get("channel_name", getattr(ch, "name", "channel")))
+            display_name = str(sweeper.get("name", "")).strip() or channel_name
+            measure_voltage = bool(sweeper.get("measure_voltage", False))
+            measure_current = bool(sweeper.get("measure_current", True))
+
+            candidates: list[tuple[str, float, str]] = []
+            if measure_voltage and ch in measured_volt:
+                candidates.append(("voltage", float(measured_volt[ch]), "V"))
+            if measure_current and ch in measured_curr:
+                candidates.append(("current", float(measured_curr[ch]), "A"))
+
+            for quantity_name, value, unit in candidates:
+                if abs(value) < threshold:
+                    continue
+                action_word = "paused" if action == "pause" else "stopped"
+                status_message = (
+                    f"Sweep {action_word} by threshold: {display_name} {quantity_name} "
+                    f"{value:.6g}{unit} (threshold {threshold:.6g}{unit}, abs compare)."
+                )
+                popup_message = (
+                    f"Threshold value {threshold:.6g}{unit} reached by {display_name}, "
+                    f"sweep now {action_word}. "
+                    f"(Measured {value:.6g}{unit})"
+                )
+                if (
+                    best_action is None
+                    or action_priority[action] > action_priority.get(best_action, 0)
+                ):
+                    best_action = action
+                    best_status_message = status_message
+                    best_popup_message = popup_message
+                break
+
+        return best_action, best_status_message, best_popup_message
 
     def _prime_initial_measurement(
         self,

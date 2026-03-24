@@ -20,7 +20,7 @@ from qcodes.dataset import initialise_or_create_database_at
 from qcodes.station import Station
 
 from . import utilities
-from .voltage_sweeper import RunWorker, build_sweepers
+from .voltage_sweeper import RunWorker, build_sweepers, ramp_sweepers_with_linking
 from .waveform_maker import ChannelConfig, build_traces, build_v_range
 from .wave_composer_dialog import WaveComposerDialog
 
@@ -820,6 +820,12 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             n_period = int(state["n_period"])
             csv_path = str(state.get("csv_path", "")).strip()
             custom_wave = state.get("custom_wave")
+            threshold_value = self._parse_threshold_value(
+                str(state.get("threshold_value", "0"))
+            )
+            threshold_action = self._parse_threshold_action(
+                str(state.get("threshold_action", "none"))
+            )
 
             link_next = (
                 self.channel_table.item(row, self.COL_LINK).checkState() == QtCore.Qt.Checked
@@ -860,6 +866,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                     independent=False,
                     link_next=link_next,
                     custom_wave=custom_wave,
+                    threshold_value=threshold_value,
+                    threshold_action=threshold_action,
                 )
             )
         return configs
@@ -870,6 +878,33 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         if not parts:
             raise ValueError("dt_list is empty")
         return [float(p) for p in parts]
+
+    @staticmethod
+    def _parse_threshold_value(value_text: str) -> float:
+        text = str(value_text).strip()
+        if not text or text.lower() == "none":
+            return 0.0
+        threshold_value = float(text)
+        if threshold_value < 0:
+            raise ValueError("Channel threshold must be >= 0.")
+        return threshold_value
+
+    @staticmethod
+    def _parse_threshold_action(action_text: str) -> str:
+        action = str(action_text).strip().lower()
+        if action not in {"none", "pause", "stop"}:
+            raise ValueError("Channel threshold action must be None, Pause, or Stop.")
+        return action
+
+    @staticmethod
+    def _parse_ramp_settings(ramp_dv_text: str, ramp_dt_text: str) -> tuple[float, float]:
+        ramp_dv = float(ramp_dv_text.strip() or "5e-5")
+        ramp_dt = float(ramp_dt_text.strip() or "1e-3")
+        if ramp_dv <= 0:
+            raise ValueError("ramp_dV must be > 0.")
+        if ramp_dt < 0:
+            raise ValueError("ramp_dT must be >= 0.")
+        return ramp_dv, ramp_dt
 
     def _get_waveform_value(self, row: int) -> str:
         widget = self.channel_table.cellWidget(row, self.COL_WAVEFORM)
@@ -1065,6 +1100,15 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         custom_layout.addWidget(self.custom_info)
         custom_layout.addWidget(self.custom_open_btn)
 
+        # Threshold action controls
+        self.threshold_group = QtWidgets.QGroupBox("Threshold Action")
+        threshold_layout = QtWidgets.QFormLayout(self.threshold_group)
+        self.threshold_value = QtWidgets.QLineEdit("0")
+        self.threshold_action = QtWidgets.QComboBox()
+        self.threshold_action.addItems(["None", "Pause", "Stop"])
+        threshold_layout.addRow("Threshold (abs; 0/none=off)", self.threshold_value)
+        threshold_layout.addRow("On Threshold Hit", self.threshold_action)
+
         layout.addWidget(self.tri_group)
         layout.addWidget(self.square_group)
         layout.addWidget(self.square3_group)
@@ -1072,6 +1116,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         layout.addWidget(self.fixed_group)
         layout.addWidget(self.csv_group)
         layout.addWidget(self.custom_group)
+        layout.addWidget(self.threshold_group)
 
         self.save_detail_btn = QtWidgets.QPushButton("Apply To Selected Channel")
         self.save_detail_btn.clicked.connect(self._on_apply_details)
@@ -1118,6 +1163,14 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
         self.fixed_v.setText(str(state["v_fixed"]))
         self.csv_path.setText(str(state.get("csv_path", "")))
+        self.threshold_value.setText(str(state.get("threshold_value", "0")))
+        threshold_action = str(state.get("threshold_action", "none")).strip().lower()
+        if threshold_action == "pause":
+            self.threshold_action.setCurrentText("Pause")
+        elif threshold_action == "stop":
+            self.threshold_action.setCurrentText("Stop")
+        else:
+            self.threshold_action.setCurrentText("None")
         custom_wave = state.get("custom_wave")
         custom_points = len(custom_wave) if isinstance(custom_wave, list) else 0
         self.custom_info.setText(f"Assigned points: {custom_points}")
@@ -1159,6 +1212,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
         state["v_fixed"] = self.fixed_v.text()
         state["csv_path"] = self.csv_path.text().strip()
+        state["threshold_value"] = self.threshold_value.text().strip()
+        state["threshold_action"] = self.threshold_action.currentText().strip().lower()
 
         if waveform.lower() == "triangle" and not self._validate_triangle_state(state):
             return
@@ -1225,6 +1280,10 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         if not isinstance(state, dict):
             state = self._default_row_state(item.text())
             item.setData(QtCore.Qt.UserRole, state)
+        if "threshold_value" not in state:
+            state["threshold_value"] = "0"
+        if "threshold_action" not in state:
+            state["threshold_action"] = "none"
         state["channel_name"] = item.text()
         state["waveform"] = self._get_waveform_value(row)
         return state
@@ -1259,6 +1318,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             "n_period": "100",
             "csv_path": "",
             "custom_wave": [],
+            "threshold_value": "0",
+            "threshold_action": "none",
         }
 
     def _set_row_state_defaults(self, row: int) -> None:
@@ -1329,12 +1390,16 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             sweepers = build_sweepers(
                 configs, self.keithleys, square_final_low=False
             )
-            ramp_dv = float(self.ramp_dv.text().strip() or "5e-5")
-            ramp_dt = float(self.ramp_dt.text().strip() or "1e-3")
-            for sweeper in sweepers:
-                utilities.ramp_voltage(
-                    sweeper["channel"], 0, rampdV=ramp_dv, rampdT=ramp_dt
-                )
+            ramp_dv, ramp_dt = self._parse_ramp_settings(
+                self.ramp_dv.text(),
+                self.ramp_dt.text(),
+            )
+            ramp_sweepers_with_linking(
+                sweepers,
+                [0.0] * len(sweepers),
+                ramp_dv,
+                ramp_dt,
+            )
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Ramp Failed", str(exc))
 
@@ -1349,6 +1414,10 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             delay_ratio = float(self.delayNPLC_ratio.text().strip() or "0.8")
             repeat = int(self.repeat.text().strip() or "1")
             round_delay = float(self.round_delay.text().strip() or "0")
+            ramp_dv, ramp_dt = self._parse_ramp_settings(
+                self.ramp_dv.text(),
+                self.ramp_dt.text(),
+            )
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Invalid Input", str(exc))
             return
@@ -1379,6 +1448,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             csv_path=csv_path,
             ramp_up=self.ramp_up.isChecked(),
             ramp_down=self.ramp_down.isChecked(),
+            ramp_dv=ramp_dv,
+            ramp_dt=ramp_dt,
             time_independent=True,
         )
         self.run_worker.moveToThread(self.run_thread)
@@ -1388,6 +1459,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.run_thread.finished.connect(self.run_thread.deleteLater)
         self.run_worker.status.connect(self._on_worker_status)
         self.run_worker.error.connect(self._on_worker_error)
+        self.run_worker.threshold_event.connect(self._on_threshold_event)
         self.run_worker.finished.connect(self._on_worker_finished)
 
         self._set_run_state(True, paused=False)
@@ -1395,9 +1467,17 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
     def _on_worker_status(self, msg: str) -> None:
         self.run_status.setText(msg)
+        msg_lower = msg.strip().lower()
+        if msg_lower.startswith("paused"):
+            self._set_run_state(True, paused=True)
+        elif msg_lower.startswith("running"):
+            self._set_run_state(True, paused=False)
 
     def _on_worker_error(self, msg: str) -> None:
         QtWidgets.QMessageBox.critical(self, "Run Failed", msg)
+
+    def _on_threshold_event(self, msg: str) -> None:
+        QtWidgets.QMessageBox.information(self, "Threshold Reached", msg)
 
     def _on_worker_finished(self) -> None:
         self._set_run_state(False)
@@ -1420,6 +1500,18 @@ def main() -> None:
     win = ArbitrarySweeperGUI()
     win.resize(1100, 800)
     win.show()
+
+    startup_message = os.environ.get("KEITHLEY_GUI_STARTUP_MESSAGE", "").strip()
+    if startup_message:
+        QtCore.QTimer.singleShot(
+            0,
+            lambda: QtWidgets.QMessageBox.information(
+                win,
+                "Startup Message",
+                startup_message,
+            ),
+        )
+
     sys.exit(app.exec_())
 
 

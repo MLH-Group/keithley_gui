@@ -35,6 +35,8 @@ class ChannelConfig:
     independent: bool
     link_next: bool
     custom_wave: list[float] | np.ndarray | None = None
+    threshold_value: float = 0.0
+    threshold_action: str = "none"
 
 
 def _build_triangle_leg(
