@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -806,6 +806,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             first_node = float(state["first_node"])
             second_node = float(state["second_node"])
             dV = float(state["dV"])
+            v_inc = float(state.get("v_inc", "0.0"))
+            n_repeat = int(state.get("n_repeat", "1"))
             v_high = float(state["v_high"])
             v_low = float(state["v_low"])
             n_high = int(state["n_high"])
@@ -850,6 +852,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                     first_node=first_node,
                     second_node=second_node,
                     dV=dV,
+                    v_inc=v_inc,
+                    n_repeat=n_repeat,
                     v_high=v_high,
                     v_low=v_low,
                     v_mid=v_mid,
@@ -1027,10 +1031,14 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.tri_first = QtWidgets.QLineEdit("0.0")
         self.tri_second = QtWidgets.QLineEdit("0.0")
         self.tri_dv = QtWidgets.QLineEdit("0.0")
+        self.tri_v_inc = QtWidgets.QLineEdit("0.0")
+        self.tri_n_repeat = QtWidgets.QLineEdit("1")
         tri_layout.addRow("Start V", self.tri_start)
         tri_layout.addRow("First Node", self.tri_first)
         tri_layout.addRow("Second Node", self.tri_second)
         tri_layout.addRow("dV", self.tri_dv)
+        tri_layout.addRow("v_inc", self.tri_v_inc)
+        tri_layout.addRow("n_repeat", self.tri_n_repeat)
 
         # Square params
         self.square_group = QtWidgets.QGroupBox("Square Params")
@@ -1141,6 +1149,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.tri_first.setText(str(state["first_node"]))
         self.tri_second.setText(str(state["second_node"]))
         self.tri_dv.setText(str(state["dV"]))
+        self.tri_v_inc.setText(str(state.get("v_inc", "0.0")))
+        self.tri_n_repeat.setText(str(state.get("n_repeat", "1")))
 
         self.sq_v_high.setText(str(state["v_high"]))
         self.sq_v_low.setText(str(state["v_low"]))
@@ -1187,6 +1197,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         state["first_node"] = self.tri_first.text()
         state["second_node"] = self.tri_second.text()
         state["dV"] = self.tri_dv.text()
+        state["v_inc"] = self.tri_v_inc.text()
+        state["n_repeat"] = self.tri_n_repeat.text()
 
         if waveform.lower() == "square-3":
             state["v_high"] = self.sq3_v_high.text()
@@ -1233,6 +1245,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
                 first_node=float(state["first_node"]),
                 second_node=float(state["second_node"]),
                 dV=float(state["dV"]),
+                v_inc=float(state.get("v_inc", "0.0")),
+                n_repeat=int(state.get("n_repeat", "1")),
                 v_high=0.0,
                 v_low=0.0,
                 v_mid=0.0,
@@ -1284,6 +1298,10 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             state["threshold_value"] = "0"
         if "threshold_action" not in state:
             state["threshold_action"] = "none"
+        if "v_inc" not in state:
+            state["v_inc"] = "0.0"
+        if "n_repeat" not in state:
+            state["n_repeat"] = "1"
         state["channel_name"] = item.text()
         state["waveform"] = self._get_waveform_value(row)
         return state
@@ -1304,6 +1322,8 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             "first_node": "0.0",
             "second_node": "0.0",
             "dV": "0.0",
+            "v_inc": "0.0",
+            "n_repeat": "1",
             "v_high": "0.0",
             "v_low": "0.0",
             "v_mid": "0.0",
@@ -1343,6 +1363,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.run_btn.setEnabled(not running)
         self.pause_btn.setEnabled(running)
         self.stop_btn.setEnabled(running)
+        self.ramp_to_zero_btn.setEnabled((not running) or paused)
         if not running:
             self.run_status.setText("Idle")
             self._set_indicator("idle")
@@ -1360,6 +1381,13 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         if self.run_worker is None:
             return
         if self.run_worker.is_paused:
+            status_lower = self.run_status.text().strip().lower()
+            in_ramp_phase = bool(getattr(self.run_worker, "_in_ramp_phase", False))
+            stop_pending = bool(getattr(self.run_worker, "_stop_requested", False))
+            if in_ramp_phase or stop_pending or status_lower.startswith("stopping") or status_lower.startswith("ramping"):
+                self.run_worker.request_resume([], [], 1, 0.0, 0.8)
+                self._set_run_state(True, paused=False)
+                return
             try:
                 configs = self._collect_channel_configs()
                 dt_list = self._parse_float_list(self.dt_list.text())
@@ -1379,9 +1407,21 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         if self.run_worker is None:
             return
         self.run_worker.request_stop()
-        self._set_run_state(False)
+        self._set_run_state(True, paused=False)
 
     def _on_ramp_to_zero(self) -> None:
+        if self.run_worker is not None and self.run_thread is not None and self.run_thread.isRunning():
+            if not self.run_worker.is_paused:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Pause Required",
+                    "Pause the run before using Ramp Channels To 0.",
+                )
+                return
+            self.run_worker.request_ramp_to_zero()
+            self._set_run_state(True, paused=False)
+            return
+
         if self.station is None or not self.keithleys:
             QtWidgets.QMessageBox.warning(self, "Not Connected", "Connect to keithleys first.")
             return
@@ -1470,7 +1510,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         msg_lower = msg.strip().lower()
         if msg_lower.startswith("paused"):
             self._set_run_state(True, paused=True)
-        elif msg_lower.startswith("running"):
+        elif msg_lower.startswith("running") or msg_lower.startswith("stopping") or msg_lower.startswith("ramping"):
             self._set_run_state(True, paused=False)
 
     def _on_worker_error(self, msg: str) -> None:
@@ -1517,3 +1557,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+

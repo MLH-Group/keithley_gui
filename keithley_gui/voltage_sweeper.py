@@ -38,6 +38,8 @@ def build_sweepers(
                 "second_node": cfg.second_node,
                 "start_voltage": cfg.start_voltage,
                 "dV": cfg.dV,
+                "v_inc": cfg.v_inc,
+                "n_repeat": cfg.n_repeat,
                 "independent": cfg.independent,
                 "link_next": cfg.link_next,
                 "threshold_value": float(cfg.threshold_value),
@@ -170,6 +172,10 @@ class RunWorker(QtCore.QObject):
         self._step_index = 0
         self.is_paused = False
         self._stop_requested = False
+        self._force_stop_requested = False
+        self._ramp_to_zero_requested = False
+        self._return_to_pause_after_ramp = False
+        self._in_ramp_phase = False
         self._last_volt: tuple[float, ...] | None = None
         self._prev_measure_volt: tuple[float, ...] | None = None
         self._last_delta: tuple[float, ...] | None = None
@@ -191,6 +197,14 @@ class RunWorker(QtCore.QObject):
         round_delay: float,
         delay_ratio: float,
     ) -> None:
+        if self._stop_requested or self._in_ramp_phase:
+            self.is_paused = False
+            self._pause_event.set()
+            if self._stop_requested:
+                self.status.emit("Stopping")
+            else:
+                self.status.emit("Running")
+            return
         self.configs = configs
         self.dt_list = dt_list
         self.repeat = repeat
@@ -202,8 +216,40 @@ class RunWorker(QtCore.QObject):
         self.status.emit("Running")
 
     def request_stop(self) -> None:
-        self._stop_requested = True
+        if self._stop_requested:
+            self._force_stop_requested = True
+            self.status.emit("Stopping immediately")
+        else:
+            self._stop_requested = True
+            self.status.emit("Stopping")
+        self.is_paused = False
         self._pause_event.set()
+
+    @QtCore.pyqtSlot()
+    def request_ramp_to_zero(self) -> None:
+        if self._stop_requested or self._force_stop_requested:
+            return
+        self._ramp_to_zero_requested = True
+        self._return_to_pause_after_ramp = self.is_paused
+        self.is_paused = False
+        self.status.emit("Ramping to 0")
+        self._pause_event.set()
+
+    def _has_pending_ramp_to_zero(self) -> bool:
+        return self._ramp_to_zero_requested and not self._stop_requested
+
+    def _should_abort_timed_phase(
+        self,
+        honor_stop: bool,
+        preempt_on_ramp_to_zero: bool,
+    ) -> bool:
+        if self._force_stop_requested:
+            return True
+        if preempt_on_ramp_to_zero and self._ramp_to_zero_requested:
+            return True
+        if honor_stop and self._stop_requested:
+            return True
+        return False
 
     def run(self) -> None:
         try:
@@ -226,12 +272,27 @@ class RunWorker(QtCore.QObject):
 
             if self.ramp_up:
                 ramp_targets = [float(sweeper["v_range"][0]) for sweeper in sweepers]
-                ramp_sweepers_with_linking(
-                    sweepers,
-                    ramp_targets,
-                    self.ramp_dv,
-                    self.ramp_dt,
-                )
+                self._in_ramp_phase = True
+                try:
+                    ramp_ok = self._ramp_sweepers_with_linking_interruptible(
+                        sweepers,
+                        ramp_targets,
+                        self.ramp_dv,
+                        self.ramp_dt,
+                        honor_stop=True,
+                        preempt_on_ramp_to_zero=True,
+                    )
+                finally:
+                    self._in_ramp_phase = False
+                if not ramp_ok:
+                    if self._force_stop_requested:
+                        self.finished.emit()
+                        return
+                    if self._has_pending_ramp_to_zero():
+                        self.status.emit("Ramping to 0")
+                    else:
+                        self._stop_requested = True
+                        self.status.emit("Stopping")
 
             for sweeper in sweepers:
                 ch = sweeper["channel"]
@@ -251,12 +312,48 @@ class RunWorker(QtCore.QObject):
             last_programmed_dt = last_dt
             next_measure_deadline = time.perf_counter()
             time_param.reset_clock()
+            results_written = False
 
             with meas_forward.run() as forward_saver:
                 while self._step_index < len(plan):
+                    self._pause_event.wait()
+
+                    if self._force_stop_requested:
+                        break
+
+                    if self._has_pending_ramp_to_zero():
+                        self._ramp_to_zero_requested = False
+                        return_to_pause = self._return_to_pause_after_ramp
+                        self._return_to_pause_after_ramp = False
+                        self._in_ramp_phase = True
+                        try:
+                            ramp_ok = self._ramp_sweepers_with_linking_interruptible(
+                                sweepers,
+                                [0.0] * len(sweepers),
+                                self.ramp_dv,
+                                self.ramp_dt,
+                                honor_stop=True,
+                            )
+                        finally:
+                            self._in_ramp_phase = False
+                        if not ramp_ok:
+                            if self._force_stop_requested or self._stop_requested:
+                                break
+                            continue
+                        self._last_volt = tuple(float(s["channel"].volt()) for s in sweepers)
+                        self._prev_measure_volt = self._last_volt
+                        self._last_delta = None
+                        if return_to_pause:
+                            self.is_paused = True
+                            self.status.emit("Paused")
+                            self._pause_event.clear()
+                        else:
+                            self.is_paused = False
+                            self.status.emit("Running")
+                        continue
+
                     if self._stop_requested:
                         break
-                    self._pause_event.wait()
 
                     if self._rebuild_on_resume:
                         sweepers = build_sweepers(self.configs, self.keithleys)
@@ -275,9 +372,8 @@ class RunWorker(QtCore.QObject):
 
                     entry = plan[self._step_index]
                     if entry["type"] == "sleep":
-                        if self._stop_requested:
+                        if not self._wait_sleep_interruptible(entry["seconds"]):
                             break
-                        threading.Event().wait(entry["seconds"])
                         next_measure_deadline = time.perf_counter()
                         self._step_index += 1
                         continue
@@ -361,6 +457,7 @@ class RunWorker(QtCore.QObject):
                         *get_readings,
                         (time_param, t),
                     )
+                    results_written = True
                     (
                         threshold_action,
                         threshold_status_msg,
@@ -403,28 +500,88 @@ class RunWorker(QtCore.QObject):
                         self._prev_measure_volt = volt_tuple
                         self._last_volt = volt_tuple
                     self._step_index += 1
-                    if self._stop_requested:
-                        break
 
             data_forward = forward_saver.dataset
-            if self.csv_path:
+            if self.csv_path and results_written:
                 csv_file = resolve_csv_path(
                     self.csv_path, self.device_name, self.exp_name, data_forward.run_id
                 )
                 data_forward.to_pandas_dataframe().to_csv(csv_file)
 
-            if self.ramp_down:
-                ramp_sweepers_with_linking(
-                    sweepers,
-                    [0.0] * len(sweepers),
-                    self.ramp_dv,
-                    self.ramp_dt,
-                )
+            if self.ramp_down and not self._force_stop_requested:
+                self.status.emit("Ramping down")
+                self._in_ramp_phase = True
+                try:
+                    self._ramp_sweepers_with_linking_interruptible(
+                        sweepers,
+                        [0.0] * len(sweepers),
+                        self.ramp_dv,
+                        self.ramp_dt,
+                        honor_stop=False,
+                    )
+                finally:
+                    self._in_ramp_phase = False
 
             self.finished.emit()
         except Exception as exc:
             self.error.emit(str(exc))
             self.finished.emit()
+
+    def _ramp_sweepers_with_linking_interruptible(
+        self,
+        sweepers: list[dict[str, Any]],
+        targets: list[float],
+        ramp_dv: float,
+        ramp_dt: float,
+        honor_stop: bool = True,
+        preempt_on_ramp_to_zero: bool = False,
+    ) -> bool:
+        ramp_dv = max(1e-12, float(ramp_dv))
+        ramp_dt = max(0.0, float(ramp_dt))
+        targets_f = [float(v) for v in targets]
+        for group_sweepers, group_targets in _iter_linked_groups(sweepers, targets_f):
+            channels = [s["channel"] for s in group_sweepers]
+            initial = [float(ch.volt()) for ch in channels]
+            max_delta = max(abs(vf - v0) for v0, vf in zip(initial, group_targets))
+            # Match legacy ramp behavior: point count depends directly on ramp_dv.
+            n_points = max(1, int(1 + (max_delta / ramp_dv)))
+
+            for idx in range(n_points):
+                self._pause_event.wait()
+                if self._should_abort_timed_phase(
+                    honor_stop=honor_stop,
+                    preempt_on_ramp_to_zero=preempt_on_ramp_to_zero,
+                ):
+                    return False
+                frac = 1.0 if n_points == 1 else (idx / (n_points - 1))
+                for ch, v0, vf in zip(channels, initial, group_targets):
+                    ch.volt(v0 + (vf - v0) * frac)
+                if ramp_dt > 0 and not self._wait_sleep_interruptible(
+                    ramp_dt,
+                    honor_stop=honor_stop,
+                    preempt_on_ramp_to_zero=preempt_on_ramp_to_zero,
+                ):
+                    return False
+        return True
+
+    def _wait_sleep_interruptible(
+        self,
+        seconds: float,
+        honor_stop: bool = True,
+        preempt_on_ramp_to_zero: bool = False,
+    ) -> bool:
+        remaining = max(0.0, float(seconds))
+        while remaining > 0:
+            self._pause_event.wait()
+            if self._should_abort_timed_phase(
+                honor_stop=honor_stop,
+                preempt_on_ramp_to_zero=preempt_on_ramp_to_zero,
+            ):
+                return False
+            t0 = time.perf_counter()
+            threading.Event().wait(min(0.05, remaining))
+            remaining -= max(0.0, time.perf_counter() - t0)
+        return True
 
     @staticmethod
     def _evaluate_threshold_action(
@@ -487,6 +644,12 @@ class RunWorker(QtCore.QObject):
         plan: list[dict[str, Any]],
         split_for_dual: bool,
     ) -> float | None:
+        if (
+            self._stop_requested
+            or self._force_stop_requested
+            or self._ramp_to_zero_requested
+        ):
+            return None
         first_measure = next((entry for entry in plan if entry["type"] == "measure"), None)
         if first_measure is None:
             return None
