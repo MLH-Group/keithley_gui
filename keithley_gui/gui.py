@@ -21,7 +21,7 @@ from qcodes.station import Station
 
 from . import utilities
 from .voltage_sweeper import RunWorker, build_sweepers, ramp_sweepers_with_linking
-from .waveform_maker import ChannelConfig, build_traces, build_v_range
+from .waveform_maker import ChannelConfig, build_plan, build_traces, build_v_range
 from .wave_composer_dialog import WaveComposerDialog
 
 
@@ -65,6 +65,23 @@ class WaveformPlot(FigureCanvasQTAgg):
             self.ax.set_ylabel("Voltage (V)")
             self.ax.legend(loc="best")
             self.ax.grid(True, which="both", alpha=0.3, linestyle="--", linewidth=0.6)
+        self.fig.tight_layout()
+        self.draw()
+
+    def plot_coverage(
+        self,
+        x: np.ndarray,
+        y: np.ndarray,
+        x_label: str,
+        y_label: str,
+    ) -> None:
+        self.fig.clear()
+        self.ax = self.fig.add_subplot(1, 1, 1)
+        self.ax.scatter(x, y, s=18)
+        self.ax.set_title("Scan Coverage")
+        self.ax.set_xlabel(f"{x_label} Voltage (V)")
+        self.ax.set_ylabel(f"{y_label} Voltage (V)")
+        self.ax.grid(True, which="both", alpha=0.3, linestyle="--", linewidth=0.6)
         self.fig.tight_layout()
         self.draw()
 
@@ -324,7 +341,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         return box
 
     def _build_plot_block(self) -> QtWidgets.QGroupBox:
-        box = QtWidgets.QGroupBox("Waveforms vs Time")
+        box = QtWidgets.QGroupBox("Waveform / Scan Preview")
         layout = QtWidgets.QHBoxLayout(box)
 
         control_col = QtWidgets.QVBoxLayout()
@@ -337,6 +354,17 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         self.plot_btn = QtWidgets.QPushButton("Plot Waveforms")
         self.plot_btn.clicked.connect(self._on_plot)
         control_col.addWidget(self.plot_btn)
+
+        coverage_form = QtWidgets.QFormLayout()
+        self.coverage_x_combo = QtWidgets.QComboBox()
+        self.coverage_y_combo = QtWidgets.QComboBox()
+        coverage_form.addRow("Coverage X", self.coverage_x_combo)
+        coverage_form.addRow("Coverage Y", self.coverage_y_combo)
+        control_col.addLayout(coverage_form)
+
+        self.coverage_plot_btn = QtWidgets.QPushButton("Plot Scan Coverage")
+        self.coverage_plot_btn.clicked.connect(self._on_plot_coverage)
+        control_col.addWidget(self.coverage_plot_btn)
 
         control_col.addWidget(QtWidgets.QFrame(frameShape=QtWidgets.QFrame.HLine))
 
@@ -577,6 +605,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
             if self.channel_table.rowCount() > 0:
                 self.channel_table.selectRow(0)
                 self._load_details_from_row(0)
+            self._refresh_coverage_axes()
 
     def _add_channel_row_from_state(self, data: dict[str, Any]) -> None:
         row = self.channel_table.rowCount()
@@ -718,6 +747,7 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
         for kname, inst in self.keithleys.items():
             for ch in ["smua", "smub"]:
                 self._add_channel_row(f"{kname}.{ch}")
+        self._refresh_coverage_axes()
 
     def _add_channel_row(self, channel_name: str) -> None:
         row = self.channel_table.rowCount()
@@ -791,6 +821,82 @@ class ArbitrarySweeperGUI(QtWidgets.QMainWindow):
 
         mode = "subplot" if self.subplot_radio.isChecked() else "overlay"
         self.plot.plot(traces, mode)
+
+    def _on_plot_coverage(self) -> None:
+        try:
+            configs = self._collect_channel_configs()
+            dt_list = self._parse_float_list(self.dt_list.text())
+            repeat = int(self.repeat.text().strip() or "1")
+            round_delay = float(self.round_delay.text().strip() or "0")
+            self._refresh_coverage_axes(configs)
+
+            if len(configs) < 2:
+                raise ValueError("Scan coverage requires at least two channels.")
+
+            channel_indexes = {
+                cfg.channel_name: idx for idx, cfg in enumerate(configs)
+            }
+            x_channel = self.coverage_x_combo.currentData()
+            y_channel = self.coverage_y_combo.currentData()
+            if x_channel == y_channel:
+                raise ValueError("Select different channels for Coverage X and Y.")
+
+            x_idx = channel_indexes[str(x_channel)]
+            y_idx = channel_indexes[str(y_channel)]
+            plan = build_plan(configs, dt_list, repeat, round_delay)
+            coordinates = [
+                entry["volt"] for entry in plan if entry.get("type") == "measure"
+            ]
+            if not coordinates:
+                raise ValueError("Scan plan contains no measurement points.")
+            x = np.asarray([values[x_idx] for values in coordinates], dtype=float)
+            y = np.asarray([values[y_idx] for values in coordinates], dtype=float)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Invalid Input", str(exc))
+            return
+
+        x_label = configs[x_idx].name or configs[x_idx].channel_name
+        y_label = configs[y_idx].name or configs[y_idx].channel_name
+        self.plot.plot_coverage(x, y, x_label, y_label)
+
+    def _refresh_coverage_axes(
+        self, configs: list[ChannelConfig] | None = None
+    ) -> None:
+        previous_x = self.coverage_x_combo.currentData()
+        previous_y = self.coverage_y_combo.currentData()
+
+        if configs is None:
+            channels = [
+                (
+                    self._get_table_text(row, self.COL_CHANNEL, f"row{row}"),
+                    self._get_table_text(row, self.COL_NAME, f"row{row}"),
+                )
+                for row in range(self.channel_table.rowCount())
+            ]
+        else:
+            channels = [(cfg.channel_name, cfg.name) for cfg in configs]
+
+        self.coverage_x_combo.blockSignals(True)
+        self.coverage_y_combo.blockSignals(True)
+        self.coverage_x_combo.clear()
+        self.coverage_y_combo.clear()
+        for channel_name, configured_name in channels:
+            name = configured_name or channel_name
+            label = name
+            if name != channel_name:
+                label = f"{name} ({channel_name})"
+            self.coverage_x_combo.addItem(label, channel_name)
+            self.coverage_y_combo.addItem(label, channel_name)
+
+        x_index = self.coverage_x_combo.findData(previous_x)
+        y_index = self.coverage_y_combo.findData(previous_y)
+        self.coverage_x_combo.setCurrentIndex(x_index if x_index >= 0 else 0)
+        default_y = 1 if len(channels) > 1 else 0
+        self.coverage_y_combo.setCurrentIndex(
+            y_index if y_index >= 0 else default_y
+        )
+        self.coverage_x_combo.blockSignals(False)
+        self.coverage_y_combo.blockSignals(False)
 
     def _collect_channel_configs(self) -> list[ChannelConfig]:
         configs: list[ChannelConfig] = []
